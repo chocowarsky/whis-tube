@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "youtube-whisper": {
+      "command": "uv",
+      "args": ["run", "--directory", ".", "python", "-m", "whis_tube.server"],
+      "env": {
+        "GROQ_KEYS_PATH": "~/.config/groq/keys.json"
+      }
+    }
+  }
+}
