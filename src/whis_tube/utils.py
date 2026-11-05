@@ -78,7 +78,7 @@ def list_channel_videos(
     Filters out YouTube Shorts (<60s) by default.
     Sorts chronologically (oldest_first) or newest_first.
     """
-    cmd = YTDLP_BASE + ["--flat-playlist", "-J", channel_url]
+    cmd = YTDLP_BASE + ["--flat-playlist", "-J", "--", channel_url]
     res = run_command(cmd, check=True)
     data = json.loads(res.stdout)
     entries = data.get("entries") or []

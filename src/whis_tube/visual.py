@@ -44,19 +44,26 @@ def extract_keyframe(
         f"bestvideo[height<={resolution}]/"
         f"232/bestvideo"
     )
-    cmd_resolve = YTDLP_BASE + ["-f", format_selector, "-g", url]
+    cmd_resolve = YTDLP_BASE + ["-f", format_selector, "-g", "--", url]
     res_url = run_command(cmd_resolve, check=False)
     if res_url.returncode != 0 or not res_url.stdout.strip():
         # Fallback to general bestvideo selector
-        cmd_resolve_fb = YTDLP_BASE + ["-f", "bestvideo/best", "-g", url]
-        res_url = run_command(cmd_resolve_fb, check=True)
+        cmd_resolve_fb = YTDLP_BASE + ["-f", "bestvideo/best", "-g", "--", url]
+        res_url = run_command(cmd_resolve_fb, check=False)
 
-    stream_url = res_url.stdout.strip().splitlines()[0]
+    if res_url.returncode != 0 or not res_url.stdout.strip():
+        # Fallback to general best format selector
+        cmd_resolve_best = YTDLP_BASE + ["-g", "--", url]
+        res_url = run_command(cmd_resolve_best, check=False)
+
+    lines = [line.strip() for line in (res_url.stdout or "").strip().splitlines() if line.strip()]
+    stream_url = lines[0] if lines else ""
 
     # Extract video ID for clean naming
-    cmd_id = YTDLP_BASE + ["--get-id", url]
+    cmd_id = YTDLP_BASE + ["--get-id", "--", url]
     res_id = run_command(cmd_id, check=False)
-    vid_id = res_id.stdout.strip() if res_id.returncode == 0 and res_id.stdout.strip() else "video"
+    raw_id = res_id.stdout.strip() if res_id.returncode == 0 and res_id.stdout.strip() else "video"
+    vid_id = sanitize_filename(raw_id)
 
     # 2. Determine target file path
     default_name = f"{vid_id}_{ts_tag}.jpg"
@@ -73,34 +80,27 @@ def extract_keyframe(
             target.parent.mkdir(parents=True, exist_ok=True)
             target_file = target
 
-    # 3. Fast range-seek via ffmpeg before input flag
-    cmd_ffmpeg = [
-        "ffmpeg",
-        "-y",
-        "-ss",
-        ts_formatted,
-        "-i",
-        stream_url,
-        "-frames:v",
+    # 3. Fast range-seek via ffmpeg before input flag with reconnect & discontinuity options
+    reconnect_args = [
+        "-reconnect",
         "1",
-        "-update",
+        "-reconnect_at_eof",
         "1",
-        "-q:v",
-        "2",
-        str(target_file),
-        "-loglevel",
-        "error",
+        "-reconnect_streamed",
+        "1",
+        "-reconnect_delay_max",
+        "5",
     ]
-    res_ffmpeg = run_command(cmd_ffmpeg, check=False)
-    if res_ffmpeg.returncode != 0 or not target_file.exists() or target_file.stat().st_size == 0:
-        # Retry with timestamp placed after -i (slower, but covers edge cases on tricky streams)
-        cmd_ffmpeg_retry = [
+
+    if stream_url:
+        cmd_ffmpeg = [
             "ffmpeg",
             "-y",
-            "-i",
-            stream_url,
+            *reconnect_args,
             "-ss",
             ts_formatted,
+            "-i",
+            stream_url,
             "-frames:v",
             "1",
             "-update",
@@ -111,7 +111,72 @@ def extract_keyframe(
             "-loglevel",
             "error",
         ]
-        run_command(cmd_ffmpeg_retry, check=True)
+        res_ffmpeg = run_command(cmd_ffmpeg, check=False)
+        if res_ffmpeg.returncode != 0 or not target_file.exists() or target_file.stat().st_size == 0:
+            # Retry with timestamp placed after -i (handles HLS stream discontinuities)
+            cmd_ffmpeg_retry = [
+                "ffmpeg",
+                "-y",
+                *reconnect_args,
+                "-i",
+                stream_url,
+                "-ss",
+                ts_formatted,
+                "-frames:v",
+                "1",
+                "-update",
+                "1",
+                "-q:v",
+                "2",
+                str(target_file),
+                "-loglevel",
+                "error",
+            ]
+            run_command(cmd_ffmpeg_retry, check=False)
+
+    # 4. Fallback 3: yt-dlp section download if direct stream seek failed or stream_url is empty
+    if not target_file.exists() or target_file.stat().st_size == 0:
+        logger.info(f"Direct stream seek failed; falling back to yt-dlp section download for {url} at {ts_formatted}...")
+        clip_start = max(0.0, ts_seconds - 1.0)
+        clip_end = ts_seconds + 3.0
+        clip_dir = pathlib.Path.home() / ".cache" / "whis-tube" / "scratch"
+        clip_dir.mkdir(parents=True, exist_ok=True)
+        clip_path = clip_dir / f"clip_{vid_id}_{ts_tag}_{os.getpid()}.mp4"
+        try:
+            cmd_clip = YTDLP_BASE + [
+                "--download-sections",
+                f"*{clip_start:.2f}-{clip_end:.2f}",
+                "-f",
+                f"bestvideo[height<={resolution}]/bestvideo/best",
+                "-o",
+                str(clip_path),
+                "--force-overwrites",
+                "--",
+                url,
+            ]
+            res_clip = run_command(cmd_clip, check=False)
+            if clip_path.exists() and clip_path.stat().st_size > 0:
+                seek_offset = ts_seconds - clip_start
+                cmd_clip_ffmpeg = [
+                    "ffmpeg",
+                    "-y",
+                    "-ss",
+                    f"{seek_offset:.3f}",
+                    "-i",
+                    str(clip_path),
+                    "-frames:v",
+                    "1",
+                    "-update",
+                    "1",
+                    "-q:v",
+                    "2",
+                    str(target_file),
+                    "-loglevel",
+                    "error",
+                ]
+                run_command(cmd_clip_ffmpeg, check=False)
+        finally:
+            clip_path.unlink(missing_ok=True)
 
     if not target_file.exists() or target_file.stat().st_size == 0:
         raise RuntimeError(f"Failed to extract frame at {ts_formatted} from {url}")

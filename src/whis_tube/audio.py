@@ -41,7 +41,7 @@ logger = logging.getLogger("whis-tube.audio")
 
 def get_video_info(url: str) -> Dict[str, Any]:
     """Fetch video metadata via yt-dlp."""
-    res = run_command(YTDLP_BASE + ["--dump-json", url], check=True)
+    res = run_command(YTDLP_BASE + ["--dump-json", "--", url], check=True)
     return json.loads(res.stdout)
 
 
@@ -116,7 +116,7 @@ def download_audio(url: str, info: Dict[str, Any]) -> Tuple[pathlib.Path, Dict[s
         else:
             logger.info(f"Downloading audio with format selector '{fsel}'...")
             p = run_command(
-                YTDLP_BASE + extra + ["-f", fsel, "-o", str(SCRATCH_DIR / f"yt_{vid}.{tag}.%(ext)s"), url],
+                YTDLP_BASE + extra + ["-f", fsel, "-o", str(SCRATCH_DIR / f"yt_{vid}.{tag}.%(ext)s"), "--", url],
                 check=False,
             )
             files = [
@@ -145,15 +145,15 @@ def download_audio(url: str, info: Dict[str, Any]) -> Tuple[pathlib.Path, Dict[s
             ).stdout
         )
         st = (probe.get("streams") or [{}])[0]
-        chosen = bool(fmt) and fsel == str(fmt["format_id"])
+        chosen = bool(fmt) and fsel == str(fmt.get("format_id") if fmt else "")
         meta = {
             "format_selector": fsel,
-            "format_id": fmt.get("format_id") if chosen else fsel,
-            "format_note": fmt.get("format_note") if chosen else None,
+            "format_id": fmt.get("format_id") if (chosen and fmt) else fsel,
+            "format_note": fmt.get("format_note") if (chosen and fmt) else None,
             "codec": st.get("codec_name"),
             "sample_rate": int(st.get("sample_rate") or 0),
             "channels": st.get("channels"),
-            "bitrate_kbps": round((fmt.get("abr") if chosen else 0) or int(st.get("bit_rate") or 0) / 1000, 1),
+            "bitrate_kbps": round((fmt.get("abr") if (chosen and fmt) else 0) or int(st.get("bit_rate") or 0) / 1000, 1),
             "degraded_fallback": degraded,
             "file": path.name,
         }
@@ -166,18 +166,24 @@ def download_audio(url: str, info: Dict[str, Any]) -> Tuple[pathlib.Path, Dict[s
 
 def to_flac16k(src: pathlib.Path) -> pathlib.Path:
     """Decode audio once to lossless 16 kHz mono FLAC with SoX high-precision resampler."""
+    if not src.is_file() or src.stat().st_size == 0:
+        raise RuntimeError(f"Audio source is missing or empty: {src}")
+
     out = src.with_suffix(".16k.flac")
-    if out.exists() and ffprobe_duration(out) > 0:
+    if out.exists() and out.stat().st_size > 0 and ffprobe_duration(out) > 0:
         return out
+    out.unlink(missing_ok=True)
 
     logger.info("Decoding to lossless 16 kHz mono FLAC (SoX resampler)...")
-    run_command([
+    result = run_command([
         "ffmpeg",
         "-y",
         "-v",
         "error",
         "-i",
         str(src),
+        "-map",
+        "0:a:0",
         "-vn",
         "-af",
         "aresample=16000:resampler=soxr:precision=28",
@@ -190,12 +196,44 @@ def to_flac16k(src: pathlib.Path) -> pathlib.Path:
         "-compression_level",
         "8",
         str(out),
-    ])
+    ], check=False)
+    if result.returncode != 0 or not out.exists() or out.stat().st_size == 0:
+        out.unlink(missing_ok=True)
+        detail = (result.stderr or "").strip().splitlines()[-1:] or ["ffmpeg did not produce audio"]
+        raise RuntimeError(f"Unable to decode an audio stream from {src.name}: {detail[0]}")
+    if ffprobe_duration(out) <= 0:
+        out.unlink(missing_ok=True)
+        raise RuntimeError(f"Decoded audio is empty or has an invalid duration: {src.name}")
     return out
 
 
-def detect_silences(flac: pathlib.Path) -> Dict[int, List[Tuple[float, float]]]:
+def parse_silence_events(stderr: str, duration: Optional[float] = None) -> List[Tuple[float, float]]:
+    """Parse silencedetect events sequentially to preserve correct start-end pairing."""
+    pairs: List[Tuple[float, float]] = []
+    current_start: Optional[float] = None
+    for line in (stderr or "").splitlines():
+        start_match = re.search(r"silence_start:\s*([\d.]+)", line)
+        if start_match:
+            current_start = float(start_match.group(1))
+            continue
+        end_match = re.search(r"silence_end:\s*([\d.]+)", line)
+        if end_match:
+            end_val = float(end_match.group(1))
+            start_val = current_start if current_start is not None else 0.0
+            if end_val > start_val:
+                pairs.append((start_val, end_val))
+            current_start = None
+
+    if current_start is not None and duration is not None and duration > current_start:
+        pairs.append((current_start, duration))
+    return pairs
+
+
+def detect_silences(flac: pathlib.Path, duration: Optional[float] = None) -> Dict[int, List[Tuple[float, float]]]:
     """Detect silences across multiple decibel thresholds (-40dB to -20dB)."""
+    if duration is None:
+        duration = ffprobe_duration(flac)
+
     out = {}
     for db in SILENCE_THRESHOLDS_DB:
         p = run_command(
@@ -213,9 +251,7 @@ def detect_silences(flac: pathlib.Path) -> Dict[int, List[Tuple[float, float]]]:
             ],
             check=False,
         )
-        starts = [float(x) for x in re.findall(r"silence_start: ([\d.]+)", p.stderr)]
-        ends = [float(x) for x in re.findall(r"silence_end: ([\d.]+)", p.stderr)]
-        out[db] = list(zip(starts, ends))
+        out[db] = parse_silence_events(p.stderr, duration=duration)
     return out
 
 
@@ -224,6 +260,9 @@ def plan_cuts(
     silences: Dict[int, List[Tuple[float, float]]],
 ) -> List[Tuple[float, float, str]]:
     """Cut audio at the deepest pause near each ~10 min target length."""
+    if duration <= 0:
+        raise ValueError("Audio duration must be greater than 0.")
+
     bounds, start = [], 0.0
     while duration - start > TARGET_CHUNK_S + SEARCH_FWD_S:
         target = start + TARGET_CHUNK_S
@@ -269,7 +308,7 @@ def cut_chunk(flac: pathlib.Path, idx: int, start: float, end: float) -> pathlib
 
 
 def _atomic_json(path: pathlib.Path, obj: Any) -> None:
-    tmp = path.with_name(path.name + ".tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, path)
 
@@ -280,6 +319,8 @@ def load_or_make_plan(
     real_dur: float,
 ) -> Tuple[List[Tuple[float, float, str]], bool]:
     """Retrieve saved cutting plan from checkpoint or generate fresh plan."""
+    if real_dur <= 0:
+        raise ValueError(f"Cannot create plan for zero or negative duration: {real_dur}")
     p = CKPT_ROOT / vid / "plan.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     if p.exists():
@@ -292,7 +333,7 @@ def load_or_make_plan(
         except Exception:
             pass
 
-    bounds = plan_cuts(real_dur, detect_silences(flac))
+    bounds = plan_cuts(real_dur, detect_silences(flac, duration=real_dur))
     _atomic_json(p, {"duration": real_dur, "model": MODEL, "bounds": bounds})
     return bounds, False
 

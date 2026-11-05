@@ -55,12 +55,16 @@ def load_groq_keys() -> List[str]:
 
 def redact(text: str) -> str:
     """Redact sensitive organization and key patterns from error logs."""
-    return re.sub(r"org_[A-Za-z0-9]+", "org_<redacted>", text or "")
+    if not text:
+        return ""
+    text = re.sub(r"org_[A-Za-z0-9]+", "org_<redacted>", text)
+    text = re.sub(r"gsk_[A-Za-z0-9_-]+", "gsk_<redacted>", text)
+    return text
 
 
 def parse_wait_s(headers: Dict[str, str], body: str) -> Optional[float]:
     """Parse remaining cooldown seconds from retry-after header or Groq response text."""
-    ra = headers.get("retry-after")
+    ra = headers.get("retry-after") or headers.get("Retry-After")
     if ra:
         try:
             return float(ra)
@@ -74,8 +78,8 @@ def parse_wait_s(headers: Dict[str, str], body: str) -> Optional[float]:
 
 
 def limit_kind(body: str) -> str:
-    """Identify which rate limit wall was hit (ASD, ASH, RPD, RPM)."""
-    m = re.search(r"\((ASD|ASH|RPD|RPM)\)", body or "")
+    """Identify which rate limit wall was hit (ASD, ASH, RPD, RPM, TPM, TPD)."""
+    m = re.search(r"\((ASD|ASH|RPD|RPM|TPM|TPD)\)", body or "")
     return m.group(1) if m else "unknown"
 
 
@@ -134,14 +138,14 @@ class KeyPool:
                     "until_iso": datetime.datetime.fromtimestamp(until).strftime("%Y-%m-%d %H:%M:%S"),
                 }
         try:
-            tmp = self.state_path.with_name(f"{self.state_path.name}.{os.getpid()}.tmp")
+            tmp = self.state_path.with_name(f"{self.state_path.name}.{os.getpid()}.{time.time_ns()}.tmp")
             tmp.write_text(json.dumps(st, indent=1), encoding="utf-8")
             os.replace(tmp, self.state_path)
         except OSError as err:
             logger.debug(f"Failed to save key state: {err}")
 
     def live(self) -> int:
-        return len(self.keys) - len(self.dead)
+        return len([i for i in range(len(self.keys)) if i not in self.dead])
 
     def cooldown(self, idx: int, wait_s: float, kind: str) -> None:
         self.cool[idx] = (time.time() + wait_s, kind)
@@ -160,7 +164,16 @@ class KeyPool:
                     self.cool.pop(self.i, None)
                     return self.i, self.keys[self.i]
 
-            reset_at, kind = min(v for i, v in self.cool.items() if i not in self.dead)
+            candidates = [v for i, v in self.cool.items() if i not in self.dead]
+            if not candidates:
+                for idx in range(len(self.keys)):
+                    if idx not in self.dead:
+                        self.i = idx
+                        self.cool.pop(idx, None)
+                        return self.i, self.keys[self.i]
+                raise RuntimeError("No valid Groq keys left in pool (all returned HTTP 401/403)")
+
+            reset_at, kind = min(candidates)
             wait = reset_at - now
             if wait > self.max_wait:
                 raise QuotaExhausted(reset_at, kind)
@@ -215,6 +228,7 @@ def groq_call(
 
             if r.status_code in (401, 403):
                 pool.dead.add(ki)
+                pool.cool.pop(ki, None)
                 logger.error(f"Key#{ki} rejected (invalid/unauthorized); removed from pool ({pool.live()} left)")
                 continue
 

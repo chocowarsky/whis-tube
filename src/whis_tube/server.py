@@ -142,6 +142,14 @@ async def get_video_info(url: str) -> str:
         loop = asyncio.get_running_loop()
         info = await loop.run_in_executor(None, lambda: _get_video_info(url))
         dur = int(info.get("duration") or 0)
+        vc = info.get("view_count")
+        if isinstance(vc, (int, float)):
+            vc_str = f"{int(vc):,}"
+        elif isinstance(vc, str) and vc.isdigit():
+            vc_str = f"{int(vc):,}"
+        else:
+            vc_str = "N/A"
+        vid_id = info.get("id") or "video"
         return (
             f"ℹ️ **Informasi Video YouTube**\n\n"
             f"- **Judul:** {info.get('title')}\n"
@@ -150,8 +158,8 @@ async def get_video_info(url: str) -> str:
             f"- **Tanggal Upload:** {info.get('upload_date') or 'N/A'}\n"
             f"- **Status Live:** {info.get('live_status') or 'vod/uploaded'}\n"
             f"- **Bahasa Asal:** {info.get('language') or 'auto'}\n"
-            f"- **View Count:** {info.get('view_count', 'N/A'):,}\n"
-            f"- **URL:** https://www.youtube.com/watch?v={info.get('id')}"
+            f"- **View Count:** {vc_str}\n"
+            f"- **URL:** https://www.youtube.com/watch?v={vid_id}"
         )
     except Exception as exc:
         return f"❌ Gagal mengambil informasi video: {exc}"
@@ -213,10 +221,12 @@ async def check_groq_quota() -> str:
 
         pool = KeyPool(keys)
         now = time.time()
+        live_cooling = sum(1 for i, (until, _) in pool.cool.items() if i not in pool.dead and until > now)
+        ready_count = pool.live() - live_cooling
         lines = [
             f"⚡ **Groq Key Pool Status** ({len(keys)} total key terdaftar)\n",
             f"- **Model Aktif:** `{MODEL}`",
-            f"- **Key Siap Digunakan:** {pool.live() - len(pool.cool)} / {len(keys)}\n",
+            f"- **Key Siap Digunakan:** {ready_count} / {len(keys)}\n",
             "| Key ID | Status | Cooldown Sisa | Reset Time |",
             "| :--- | :--- | :--- | :--- |",
         ]
@@ -227,7 +237,10 @@ async def check_groq_quota() -> str:
             elif idx in pool.cool:
                 until, kind = pool.cool[idx]
                 rem = max(0, int(until - now))
-                lines.append(f"| `{kid}` | ⏳ Cooling ({kind}) | {rem}s | {time.strftime('%H:%M:%S', time.localtime(until))} |")
+                if rem > 0:
+                    lines.append(f"| `{kid}` | ⏳ Cooling ({kind}) | {rem}s | {time.strftime('%H:%M:%S', time.localtime(until))} |")
+                else:
+                    lines.append(f"| `{kid}` | ✅ Ready | - | - |")
             else:
                 lines.append(f"| `{kid}` | ✅ Ready | - | - |")
 

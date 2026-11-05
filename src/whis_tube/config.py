@@ -25,9 +25,20 @@ else:
     SCRATCH_DIR = pathlib.Path.home() / ".cache" / "whis-tube" / "scratch"
 
 SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    if os.name != "nt":
+        os.chmod(SCRATCH_DIR, 0o700)
+except OSError:
+    pass
+
 KEY_STATE_PATH = SCRATCH_DIR / "groq_key_state.json"
 CKPT_ROOT = SCRATCH_DIR / "checkpoints"
 CKPT_ROOT.mkdir(parents=True, exist_ok=True)
+try:
+    if os.name != "nt":
+        os.chmod(CKPT_ROOT, 0o700)
+except OSError:
+    pass
 
 # Chunking and audio pipeline settings
 TARGET_CHUNK_S = int(os.environ.get("TARGET_CHUNK_S", "600"))     # ~10 min target
