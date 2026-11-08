@@ -7,7 +7,7 @@ import os
 import pathlib
 from typing import Any, Dict
 
-from .config import YTDLP_BASE
+from .config import SCRATCH_DIR, YTDLP_BASE
 from .utils import fmt_ts, parse_ts, run_command, sanitize_filename
 
 logger = logging.getLogger("whis-tube.visual")
@@ -37,6 +37,17 @@ def extract_keyframe(
     ts_seconds = parse_ts(timestamp)
     ts_formatted = fmt_ts(ts_seconds)
     ts_tag = ts_formatted.replace(":", "")
+
+    # Validate and clamp resolution
+    try:
+        res_int = int(resolution)
+    except (ValueError, TypeError):
+        res_int = 720
+    if res_int <= 0:
+        res_int = 720
+    elif res_int > 4320:
+        res_int = 4320
+    resolution = res_int
 
     # 1. Resolve direct HLS manifest stream URL via yt-dlp
     format_selector = (
@@ -139,7 +150,7 @@ def extract_keyframe(
         logger.info(f"Direct stream seek failed; falling back to yt-dlp section download for {url} at {ts_formatted}...")
         clip_start = max(0.0, ts_seconds - 1.0)
         clip_end = ts_seconds + 3.0
-        clip_dir = pathlib.Path.home() / ".cache" / "whis-tube" / "scratch"
+        clip_dir = SCRATCH_DIR
         clip_dir.mkdir(parents=True, exist_ok=True)
         clip_path = clip_dir / f"clip_{vid_id}_{ts_tag}_{os.getpid()}.mp4"
         try:
@@ -179,6 +190,7 @@ def extract_keyframe(
             clip_path.unlink(missing_ok=True)
 
     if not target_file.exists() or target_file.stat().st_size == 0:
+        target_file.unlink(missing_ok=True)
         raise RuntimeError(f"Failed to extract frame at {ts_formatted} from {url}")
 
     # Inspect dimensions

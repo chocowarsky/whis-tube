@@ -128,38 +128,63 @@ def download_audio(url: str, info: Dict[str, Any]) -> Tuple[pathlib.Path, Dict[s
                 continue
             path = files[0]
 
-        probe = json.loads(
-            run_command(
-                [
-                    "ffprobe",
-                    "-v",
-                    "error",
-                    "-select_streams",
-                    "a:0",
-                    "-show_entries",
-                    "stream=codec_name,sample_rate,channels,bit_rate",
-                    "-of",
-                    "json",
-                    str(path),
-                ]
-            ).stdout
-        )
-        st = (probe.get("streams") or [{}])[0]
-        chosen = bool(fmt) and fsel == str(fmt.get("format_id") if fmt else "")
-        meta = {
-            "format_selector": fsel,
-            "format_id": fmt.get("format_id") if (chosen and fmt) else fsel,
-            "format_note": fmt.get("format_note") if (chosen and fmt) else None,
-            "codec": st.get("codec_name"),
-            "sample_rate": int(st.get("sample_rate") or 0),
-            "channels": st.get("channels"),
-            "bitrate_kbps": round((fmt.get("abr") if (chosen and fmt) else 0) or int(st.get("bit_rate") or 0) / 1000, 1),
-            "degraded_fallback": degraded,
-            "file": path.name,
-        }
-        if degraded:
-            logger.warning("Using degraded progressive fallback audio.")
-        return path, meta
+            try:
+                probe_res = run_command(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "a:0",
+                        "-show_entries",
+                        "stream=codec_name,sample_rate,channels,bit_rate",
+                        "-of",
+                        "json",
+                        str(path),
+                    ],
+                    check=False,
+                )
+                if probe_res.returncode != 0 or not probe_res.stdout.strip():
+                    logger.warning(f"ffprobe failed for {path.name}: {probe_res.stderr}")
+                    continue
+                probe = json.loads(probe_res.stdout)
+            except Exception as probe_err:
+                logger.warning(f"Failed to probe audio file {path.name}: {probe_err}")
+                continue
+
+            st = (probe.get("streams") or [{}])[0]
+            chosen = bool(fmt) and fsel == str(fmt.get("format_id") if fmt else "")
+
+            def _safe_int(val: Any) -> int:
+                if val is None:
+                    return 0
+                s = str(val).strip()
+                if s.isdigit():
+                    return int(s)
+                try:
+                    return int(float(s))
+                except (ValueError, TypeError):
+                    return 0
+
+            raw_sr = _safe_int(st.get("sample_rate"))
+            raw_br = _safe_int(st.get("bit_rate"))
+            abr_val = (fmt.get("abr") if (chosen and fmt) else 0) or 0
+            bitrate_kbps = round(float(abr_val) if abr_val else (raw_br / 1000.0), 1)
+
+            meta = {
+                "format_selector": fsel,
+                "format_id": fmt.get("format_id") if (chosen and fmt) else fsel,
+                "format_note": fmt.get("format_note") if (chosen and fmt) else None,
+                "codec": st.get("codec_name"),
+                "sample_rate": raw_sr,
+                "channels": st.get("channels"),
+                "bitrate_kbps": bitrate_kbps,
+                "degraded_fallback": degraded,
+                "file": path.name,
+            }
+            if degraded:
+                logger.warning("Using degraded progressive fallback audio.")
+            return path, meta
 
     raise RuntimeError(f"All audio download attempts failed for {vid}")
 
@@ -303,6 +328,7 @@ def cut_chunk(flac: pathlib.Path, idx: int, start: float, end: float) -> pathlib
         str(out),
     ])
     if out.stat().st_size > MAX_UPLOAD_BYTES:
+        out.unlink(missing_ok=True)
         raise RuntimeError(f"Chunk {out.name} exceeds upload cap; lower TARGET_CHUNK_S.")
     return out
 
@@ -373,6 +399,8 @@ def transcribe_video(
 
     if info.get("live_status") == "is_live":
         raise RuntimeError("Video is currently broadcasting live; wait until the stream ends.")
+    if info.get("live_status") in ("is_upcoming", "post_live"):
+        raise RuntimeError("Video is an upcoming premiere/live stream and has not aired yet.")
 
     safe_title = sanitize_filename(title)
     default_name = f"{vid}_{safe_title}.md"
@@ -410,11 +438,13 @@ def transcribe_video(
                 resumed += 1
             else:
                 chunk = cut_chunk(flac, idx, start, end)
-                tail = " ".join(s["text"] for s in segments[-6:])[-400:]
-                prompt = (base_prompt + " " + tail).strip()[-600:]
-                segs, wds = transcribe_chunk(pool, chunk, start, lang, prompt)
-                save_chunk_ckpt(vid, idx, segs, wds)
-                chunk.unlink(missing_ok=True)
+                try:
+                    tail = " ".join(s["text"] for s in segments[-6:])[-400:]
+                    prompt = (base_prompt + " " + tail).strip()[-600:]
+                    segs, wds = transcribe_chunk(pool, chunk, start, lang, prompt)
+                    save_chunk_ckpt(vid, idx, segs, wds)
+                finally:
+                    chunk.unlink(missing_ok=True)
             segments.extend(segs)
             words.extend(wds)
     except QuotaExhausted as e:
