@@ -23,6 +23,13 @@ from .config import (
     TARGET_CHUNK_S,
     YTDLP_BASE,
 )
+from .code_switch import (
+    build_whisper_prompt,
+    extract_metadata_terms,
+    is_hallucination_segment,
+    normalize_code_switch_text,
+    resolve_language,
+)
 from .groq_pool import (
     KeyPool,
     QuotaExhausted,
@@ -190,7 +197,7 @@ def download_audio(url: str, info: Dict[str, Any]) -> Tuple[pathlib.Path, Dict[s
 
 
 def to_flac16k(src: pathlib.Path) -> pathlib.Path:
-    """Decode audio once to lossless 16 kHz mono FLAC with SoX high-precision resampler."""
+    """Decode audio once to lossless 16 kHz mono FLAC with speech clarity filter & SoX high-precision resampler."""
     if not src.is_file() or src.stat().st_size == 0:
         raise RuntimeError(f"Audio source is missing or empty: {src}")
 
@@ -199,7 +206,8 @@ def to_flac16k(src: pathlib.Path) -> pathlib.Path:
         return out
     out.unlink(missing_ok=True)
 
-    logger.info("Decoding to lossless 16 kHz mono FLAC (SoX resampler)...")
+    logger.info("Decoding to lossless 16 kHz mono FLAC (speech clarity filter & SoX resampler)...")
+    filter_chain = "highpass=f=80,dynaudnorm=f=150:g=15:p=0.95,aresample=16000:resampler=soxr:precision=28"
     result = run_command([
         "ffmpeg",
         "-y",
@@ -211,7 +219,7 @@ def to_flac16k(src: pathlib.Path) -> pathlib.Path:
         "0:a:0",
         "-vn",
         "-af",
-        "aresample=16000:resampler=soxr:precision=28",
+        filter_chain,
         "-ac",
         "1",
         "-sample_fmt",
@@ -222,6 +230,33 @@ def to_flac16k(src: pathlib.Path) -> pathlib.Path:
         "8",
         str(out),
     ], check=False)
+
+    if result.returncode != 0 or not out.exists() or out.stat().st_size == 0:
+        logger.warning("Clarity filter with SoX resampler failed; attempting basic aresample fallback...")
+        out.unlink(missing_ok=True)
+        result = run_command([
+            "ffmpeg",
+            "-y",
+            "-v",
+            "error",
+            "-i",
+            str(src),
+            "-map",
+            "0:a:0",
+            "-vn",
+            "-af",
+            "aresample=16000",
+            "-ac",
+            "1",
+            "-sample_fmt",
+            "s16",
+            "-c:a",
+            "flac",
+            "-compression_level",
+            "8",
+            str(out),
+        ], check=False)
+
     if result.returncode != 0 or not out.exists() or out.stat().st_size == 0:
         out.unlink(missing_ok=True)
         detail = (result.stderr or "").strip().splitlines()[-1:] or ["ffmpeg did not produce audio"]
@@ -383,6 +418,7 @@ def transcribe_video(
     url: str,
     output_path: str = "",
     language: Optional[str] = None,
+    glossary: str = "",
 ) -> Dict[str, Any]:
     """Run full verbatim audio transcription pipeline with multi-key Groq Whisper Large V3."""
     keys = load_groq_keys()
@@ -395,7 +431,6 @@ def transcribe_video(
     title = info.get("title") or f"Video_{vid}"
     duration = int(info.get("duration") or 0)
     channel = info.get("channel") or info.get("uploader") or "YouTube Creator"
-    lang = language or (info.get("language") or "").split("-")[0].lower() or None
 
     if info.get("live_status") == "is_live":
         raise RuntimeError("Video is currently broadcasting live; wait until the stream ends.")
@@ -424,7 +459,10 @@ def transcribe_video(
     real_dur = ffprobe_duration(flac)
     bounds, reused = load_or_make_plan(vid, flac, real_dur)
 
-    base_prompt = f"{title}. {channel}."
+    lang = resolve_language(language, info, audio_meta)
+    terms = extract_metadata_terms(info, custom_glossary=glossary, max_terms=40)
+    base_prompt = build_whisper_prompt(title, channel, lang, terms, prev_segments=None, include_tail=False)
+
     segments: List[Dict[str, Any]] = []
     words: List[Dict[str, Any]] = []
     resumed = 0
@@ -439,9 +477,16 @@ def transcribe_video(
             else:
                 chunk = cut_chunk(flac, idx, start, end)
                 try:
-                    tail = " ".join(s["text"] for s in segments[-6:])[-400:]
-                    prompt = (base_prompt + " " + tail).strip()[-600:]
-                    segs, wds = transcribe_chunk(pool, chunk, start, lang, prompt)
+                    prompt = build_whisper_prompt(
+                        title=title,
+                        channel=channel,
+                        lang=lang,
+                        terms=terms,
+                        prev_segments=segments,
+                        include_tail=True,
+                        max_chars=600,
+                    )
+                    segs, wds = transcribe_chunk(pool, chunk, start, lang, prompt, base_prompt=base_prompt)
                     save_chunk_ckpt(vid, idx, segs, wds)
                 finally:
                     chunk.unlink(missing_ok=True)
@@ -452,7 +497,38 @@ def transcribe_video(
         raise
 
     segments.sort(key=lambda s: s["start"])
-    flagged = [s for s in segments if s["flags"]]
+
+    # Filter pure silence hallucinations at start and end
+    while segments and is_hallucination_segment(segments[0]) and (
+        "possible_hallucination" in segments[0].get("flags", [])
+        or (segments[0].get("no_speech_prob") or 0) > 0.4
+        or (segments[0].get("avg_logprob") or 0) < -0.8
+    ):
+        segments.pop(0)
+
+    while segments and is_hallucination_segment(segments[-1]) and (
+        "possible_hallucination" in segments[-1].get("flags", [])
+        or (segments[-1].get("no_speech_prob") or 0) > 0.4
+        or (segments[-1].get("avg_logprob") or 0) < -0.8
+    ):
+        segments.pop()
+
+    # Apply deterministic phonetic normalization for Indonesian-English code-switching
+    phonetic_corrections_count = 0
+    for s in segments:
+        orig_text = s.get("text", "")
+        norm_text = normalize_code_switch_text(orig_text)
+        if norm_text != orig_text:
+            phonetic_corrections_count += 1
+            s["text"] = norm_text
+
+    for w in words:
+        orig_word = w.get("word", "")
+        norm_word = normalize_code_switch_text(orig_word)
+        if norm_word != orig_word:
+            w["word"] = norm_word
+
+    flagged = [s for s in segments if s.get("flags")]
 
     # Build verbatim Markdown
     a = audio_meta
@@ -463,9 +539,10 @@ def transcribe_video(
         f"- **URL:** https://www.youtube.com/watch?v={vid}",
         f"- **Duration:** {fmt_ts(duration)} ({duration}s)",
         f"- **Transcription Engine:** Groq {MODEL} (verbatim, temperature 0, language: {lang or 'auto'})",
+        f"- **Bilingual Code-Switching:** {'Enabled' if lang == 'id' else 'Off'} (glossary terms: {len(terms)}, phonetic corrections: {phonetic_corrections_count})",
         f"- **Audio Source:** format {a['format_id']} | {a['codec']} {a['bitrate_kbps']} kbps {a['sample_rate']} Hz | {a['format_note'] or '-'}"
         + (" | DEGRADED FALLBACK" if a["degraded_fallback"] else ""),
-        f"- **Preprocessing:** Lossless FLAC 16 kHz mono (SoX resampler), {len(bounds)} silence-aligned chunk(s)",
+        f"- **Preprocessing:** Lossless FLAC 16 kHz mono (clarity filter & SoX resampler), {len(bounds)} silence-aligned chunk(s)",
         f"- **Key Pool:** {pool.live()} valid of {len(keys)} Groq keys",
         f"- **Chunk Cuts:** " + ("; ".join(f"{fmt_ts(e)} ({h})" for _, e, h in bounds[:-1]) if len(bounds) > 1 else "None (single chunk)"),
         f"- **Low-Confidence Segments:** {len(flagged)} of {len(segments)} (flagged for video frame verification)",
@@ -509,8 +586,14 @@ def transcribe_video(
                 "pipeline": {
                     "model": MODEL,
                     "temperature": 0,
-                    "preprocess": "flac_16k_mono_soxr",
+                    "preprocess": "flac_16k_mono_soxr_clarity",
                     "resumed_chunks": resumed,
+                    "code_switch": {
+                        "resolved_language": lang,
+                        "glossary_terms_count": len(terms),
+                        "phonetic_corrections_count": phonetic_corrections_count,
+                        "terms": terms,
+                    },
                     "chunks": [
                         {"start": round(s, 3), "end": round(e, 3), "cut": h}
                         for s, e, h in bounds
@@ -537,9 +620,12 @@ def transcribe_video(
         "title": title,
         "channel": channel,
         "duration": fmt_ts(duration),
+        "language": lang,
         "total_segments": len(segments),
         "total_words": word_count,
         "low_confidence_segments": len(flagged),
+        "glossary_terms_count": len(terms),
+        "phonetic_corrections_count": phonetic_corrections_count,
         "transcript_path": str(out_file.resolve()),
         "raw_json_path": str(raw_file.resolve()),
         "elapsed_seconds": elapsed,

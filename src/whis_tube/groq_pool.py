@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from .code_switch import is_hallucination_segment
 from .config import (
     GROQ_API_KEY_ENV,
     GROQ_URL,
@@ -271,9 +272,9 @@ def flag_segment(seg: Dict[str, Any]) -> List[str]:
     flags = []
     if (seg.get("compression_ratio") or 0) > 2.4:
         flags.append("repetition")
-    if (seg.get("avg_logprob") or 0) < -1.0:
+    if (seg.get("avg_logprob") or 0) < -0.8:
         flags.append("low_confidence")
-    if (seg.get("no_speech_prob") or 0) > 0.6 and (seg.get("avg_logprob") or 0) < -0.5:
+    if ((seg.get("no_speech_prob") or 0) > 0.6 and (seg.get("avg_logprob") or 0) < -0.5) or is_hallucination_segment(seg):
         flags.append("possible_hallucination")
     return flags
 
@@ -284,6 +285,7 @@ def transcribe_chunk(
     offset: float,
     lang: Optional[str],
     prompt: str,
+    base_prompt: str = "",
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Transcribe a single audio chunk with timestamp offset adjustment and repetition retry."""
     def extract_words(res: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -334,7 +336,8 @@ def transcribe_chunk(
     if segs and (repetition_count / len(segs) > 0.1):
         logger.info(f"{repetition_count} repetition segments found; retrying at temp=0.2...")
         try:
-            res_retry = groq_call(pool, chunk, lang, prompt="", temperature=0.2)
+            retry_prompt = base_prompt if base_prompt else ""
+            res_retry = groq_call(pool, chunk, lang, prompt=retry_prompt, temperature=0.2)
             alt_segs = parse_segments(res_retry)
             if sum("repetition" in s["flags"] for s in alt_segs) < repetition_count:
                 segs = alt_segs

@@ -21,7 +21,8 @@
 
 ## ✨ Key Features
 
-- **True Verbatim Audio Ground-Truth (No Auto-Captions):** Fetches the original audio track (actively rejecting AI auto-dubbing), decodes once to FLAC 16 kHz mono using the SoX resampler, and transcribes every spoken word with timestamp accuracy.
+- **True Verbatim Audio Ground-Truth (No Auto-Captions):** Fetches the original audio track (actively rejecting AI auto-dubbing), decodes once to FLAC 16 kHz mono using the SoX resampler and speech-clarity filter (`highpass`, `dynaudnorm`), and transcribes every spoken word with timestamp accuracy.
+- **Bilingual Indonesian-English Code-Switching:** Smart language detection, automated ticker and brand extraction (BTC, IHSG, BlackRock, TradingView), domain glossaries (crypto, finance, tech), deterministic phonetic collision normalization, and boilerplate hallucination filtering.
 - **Smart Silence-Detected Chunking (<25MB):** Automatically detects pauses and silence intervals to slice long audio (1–3+ hours) into ~10-minute segments. Requests strictly remain under Groq's 25 MB payload limit.
 - **Multi-Key Pool & 429 Failover:** Rotates across multiple Groq API keys seamlessly. When an HTTP 429 rate limit is encountered, the server reads the `retry-after` header, flags the key for cooldown, and transparently dispatches remaining chunks to another available key without failing the task.
 - **Rapid Visual Keyframe Extraction (HLS Range-Seek):** Extracts crisp native 720p/1080p frames in 4–7 seconds on exact timestamps without downloading the entire video file.
@@ -103,7 +104,7 @@ The `youtube-whisper` server automatically detects this pool file, manages round
 
 | Tool Name | Description | Arguments |
 | :--- | :--- | :--- |
-| `transcribe_youtube` | Downloads original audio, chunks at silence (<25MB), and transcribes verbatim into timestamped `.md` and structured `_raw.json`. | `url` (str), `output_path` (str, optional), `language` (str, optional) |
+| `transcribe_youtube` | Downloads original audio, chunks at silence (<25MB), and transcribes verbatim into timestamped `.md` and structured `_raw.json` with bilingual code-switching. | `url` (str), `output_path` (str, optional), `language` (str, optional), `glossary` (str, optional) |
 | `extract_keyframe` | Extracts native HD frames (720p / 1080p) at exact timestamps (`HH:MM:SS`) in 4–7 seconds via HLS seek. | `url` (str), `timestamp` (str), `output_path` (str, optional), `resolution` (int, default 720) |
 | `get_video_info` | Retrieves concise metadata (title, channel, duration, live stream status). | `url` (str) |
 | `list_channel_videos` | Generates a chronological catalog of channel uploads (excluding Shorts), ordered oldest to newest. | `channel_url` (str), `limit` (int, default 30), `sort_order` (str, `oldest_first`/`newest_first`) |
@@ -127,7 +128,8 @@ whis-tube/
         ├── __init__.py     # Package metadata
         ├── __main__.py     # Module CLI entrypoint
         ├── server.py       # FastMCP server & registered tool definitions
-        ├── audio.py        # yt-dlp, SoX FLAC encoding, silence detection & chunking
+        ├── audio.py        # yt-dlp, SoX FLAC encoding, clarity filter & chunking
+        ├── code_switch.py  # Bilingual Indonesian-English code-switching & phonetic rules
         ├── groq_pool.py    # Multi-key Groq pool & automatic 429 failover
         ├── visual.py       # HLS range-seek frame grabber
         └── utils.py        # Timestamp formatting & channel parser

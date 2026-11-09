@@ -53,15 +53,19 @@ async def transcribe_youtube(
     url: str,
     output_path: str = "",
     language: str = "",
+    glossary: str = "",
 ) -> str:
     """Download audio, apply silence-detected chunking (<25MB), and transcribe verbatim
-    via Groq Whisper Large V3 with timestamped segment accuracy.
+    via Groq Whisper Large V3 with timestamped segment accuracy and bilingual code-switching.
 
     Args:
         url: YouTube video URL (standard watch, short link, or completed livestream archive).
         output_path: Optional output path or directory for transcript files (.md & _raw.json).
                      Defaults to './transcripts/<video_id>_<title>.md'.
-        language: Optional language code (e.g. 'id', 'en', 'ja'). If omitted, auto-detected.
+        language: Optional language code (e.g. 'id', 'en', 'ja'). If omitted, auto-detected
+                  with Indonesian code-switching detection.
+        glossary: Optional comma-separated custom domain keywords or glossary terms
+                  (e.g. 'Sui, Aptos, Arbitrum, LayerZero').
     """
     logger.info(f"Received transcribe request: {url}")
     try:
@@ -69,15 +73,20 @@ async def transcribe_youtube(
         loop = asyncio.get_running_loop()
         res = await loop.run_in_executor(
             None,
-            lambda: _transcribe_video(url, output_path=output_path, language=language or None),
+            lambda: _transcribe_video(url, output_path=output_path, language=language or None, glossary=glossary),
         )
+        glossary_info = f"- **Istilah Glosarium:** {res.get('glossary_terms_count', 0)}\n" if res.get('glossary_terms_count') else ""
+        phonetic_info = f"- **Koreksi Fonetik:** {res.get('phonetic_corrections_count', 0)}\n" if res.get('phonetic_corrections_count') else ""
         return (
             f"✅ Transkripsi Berhasil!\n\n"
             f"- **Judul:** {res['title']}\n"
             f"- **Channel:** {res['channel']}\n"
             f"- **Durasi:** {res['duration']}\n"
+            f"- **Bahasa:** {res.get('language') or 'auto'}\n"
             f"- **Total Segmen:** {res['total_segments']} ({res['total_words']:,} kata)\n"
             f"- **Segmen Low-Confidence:** {res['low_confidence_segments']}\n"
+            f"{glossary_info}"
+            f"{phonetic_info}"
             f"- **Waktu Proses:** {res['elapsed_seconds']}s\n"
             f"- **File Markdown:** `{res['transcript_path']}`\n"
             f"- **File Raw JSON:** `{res['raw_json_path']}`"

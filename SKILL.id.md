@@ -1,24 +1,25 @@
 ---
 name: youtube-whisper
 description: "Pipeline transkripsi verbatim YouTube (Whisper Large V3) dan ekstraksi keyframe visual HD kilat untuk riset video agen AI."
-version: 1.0.0
+version: 1.1.0
 author: chocowarsky
 license: MIT
 metadata:
-  tags: [YouTube, Whisper, Video, Speech-to-Text, Keyframe, Groq, FastMCP]
+  tags: [YouTube, Whisper, Video, Speech-to-Text, Keyframe, Groq, FastMCP, Code-Switching]
 ---
 
 # Panduan Keahlian YouTube Whisper (Indonesian SOP)
 
 🌐 **[English Version](SKILL.md)** | **[Versi Bahasa Indonesia](SKILL.id.md)**
 
-Pipeline standar untuk riset mendalam video YouTube menggunakan transkripsi verbatim (kata per kata) lossless via Groq Whisper Large V3 dan ekstraksi frame visual HD (720p/1080p) otomatis via HLS range-seek.
+Pipeline standar untuk riset mendalam video YouTube menggunakan transkripsi verbatim (kata per kata) lossless via Groq Whisper Large V3, peningkatan bilingual code-switching Indonesia-Inggris, dan ekstraksi frame visual HD (720p/1080p) otomatis via HLS range-seek.
 
 ## Kapan Menggunakan Keahlian Ini
 
 1. **Riset Video YouTube Berdurasi Panjang**: Saat pengguna meminta ringkasan, transkrip, atau analisis mendalam dari video 10 menit hingga beberapa jam (podcast, livestream, presentasi teknis).
 2. **Kebutuhan Akurasi Verbatim (Ground Truth)**: Jangan pernah mengandalkan *auto-captions* bawaan YouTube yang sering memotong angka, menghilangkan tanda baca, atau salah mengeja ticker finansial dan istilah teknis.
-3. **Verifikasi Visual (Charts, Slides, Formula)**: Saat transkrip merujuk pada visual ("lihat di chart ini", "seperti pada slide"), panggil tool `extract_keyframe` untuk menarik gambar HD di timestamp tersebut dan lakukan inspeksi vision.
+3. **Konten Teknis Bilingual Indonesia-Inggris (Code-Switching)**: Saat mentranskripsi video berbahasa Indonesia bertema kripto, saham, AI, atau teknologi di mana pembicara memadukan istilah-istilah bahasa Inggris.
+4. **Verifikasi Visual (Charts, Slides, Formula)**: Saat transkrip merujuk pada visual ("lihat di chart ini", "seperti pada slide"), panggil tool `extract_keyframe` untuk menarik gambar HD di timestamp tersebut dan lakukan inspeksi vision.
 
 ---
 
@@ -26,7 +27,7 @@ Pipeline standar untuk riset mendalam video YouTube menggunakan transkripsi verb
 
 | Tool | Fungsi | Parameter Utama |
 | :--- | :--- | :--- |
-| `transcribe_youtube` | Transkripsi audio penuh verbatim dengan smart chunking (<25MB) | `url`, `output_path`, `language` |
+| `transcribe_youtube` | Transkripsi audio penuh verbatim dengan smart chunking (<25MB) dan code-switching bilingual | `url`, `output_path`, `language`, `glossary` |
 | `extract_keyframe` | Ambil tangkapan layar HD (720p/1080p) dalam hitungan detik | `url`, `timestamp` (HH:MM:SS), `resolution` |
 | `get_video_info` | Metadata video (judul, channel, durasi, status live) | `url` |
 | `list_channel_videos` | Katalog video channel berurutan (exclude Shorts) | `channel_url`, `limit`, `sort_order` |
@@ -36,12 +37,16 @@ Pipeline standar untuk riset mendalam video YouTube menggunakan transkripsi verb
 
 ## Standar Kualitas & Prosedur Kerja
 
-### 1. Transkripsi Audio (Zero-Shortcuts)
-- Panggil `transcribe_youtube(url="<link>")`.
-- Script otomatis memisahkan audio original (menghindari dubbing AI), decode ke FLAC mono 16 kHz (SoX resampler), memotong di titik jeda hening (*silence detection*), dan mentranskripsikannya ke Groq API.
+### 1. Transkripsi Audio & Bilingual Code-Switching
+- Panggil `transcribe_youtube(url="<link>", glossary="...")`.
+- Pipeline mengisolasi trek audio original, menerapkan filter kejernihan suara (`highpass=f=80,dynaudnorm=f=150:g=15:p=0.95`), dan decode ke FLAC mono 16 kHz (SoX resampler).
+- Secara cerdas mendeteksi bahasa Indonesia dari metadata meskipun label YouTube salah tertulis bahasa Inggris.
+- Mengekstrak ticker finansial (BTC, IHSG, FOMC), brand CamelCase (BlackRock, TradingView, Pump.fun), dan glosarium domain untuk menyusun prompt terkelola (<600 karakter) dengan seed gaya dwibahasa.
+- Menerapkan normalisasi fonetik deterministik (memperbaiki kesalahan dengar seperti "busai" -> "Bursa Efek", "PAMFAN" -> "Pump.fun", "Starling" -> "Starlink") serta memfilter halusinasi hening.
+- Mendukung kamus custom pengguna via `~/.config/whis-tube/lexicon.json` atau parameter `glossary="istilah1, istilah2"`.
 - Output tersimpan dalam dua format:
   - File `.md`: Transkrip ber-timestamp rapi `[HH:MM:SS - HH:MM:SS]`.
-  - File `_raw.json`: Data mentah segmen, kata per kata, dan flag *low_confidence*.
+  - File `_raw.json`: Data mentah segmen, kata per kata, metadata code-switching, dan flag *low_confidence*.
 
 ### 2. Validasi Visual & Ambiguitas
 - Jika transkrip menandai adanya *low_confidence* atau pembicara merujuk grafik/tabel di layar:

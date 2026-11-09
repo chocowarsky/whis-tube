@@ -21,7 +21,8 @@
 
 ## ✨ Fitur Unggulan
 
-- **Transkripsi Verbatim Murni (Bukan Auto-Caption):** Mengunduh trek audio original (menolak track auto-dubbing AI), decode satu kali ke FLAC 16 kHz mono (SoX resampler), dan mentranskripsi dengan presisi kata per kata tanpa sensor atau teks hilang.
+- **Transkripsi Verbatim Murni (Bukan Auto-Caption):** Mengunduh trek audio original (menolak track auto-dubbing AI), decode satu kali ke FLAC 16 kHz mono (filter kejernihan suara dan SoX resampler), dan mentranskripsi dengan presisi kata per kata tanpa sensor atau teks hilang.
+- **Peningkatan Bilingual Code-Switching (Indonesia-Inggris):** Deteksi cerdas bahasa Indonesia, ekstraksi otomatis istilah teknis dan ticker (BTC, IHSG, BlackRock, TradingView), glosarium domain (crypto, finance, tech), normalisasi fonetik deterministik, dan pembersihan halusinasi boilerplate hening.
 - **Smart Silence-Detected Chunking (<25MB):** Otomatis mendeteksi jeda hening (*silence detection*) untuk memotong audio panjang (1–3+ jam) menjadi segmen ~10 menit. File selalu aman di bawah limit 25 MB Groq Free Plan.
 - **Multi-Key Pool & 429 Failover:** Rotasi otomatis multi-key Groq API. Jika salah satu key menyentuh rate limit 429, sistem membaca header `retry-after`, menaruh key dalam status cooldown, dan langsung mengalihkan chunk berikutnya ke key lain tanpa menghentikan proses.
 - **Ekstraksi Keyframe Kilat (HLS Range-Seek):** Menarik tangkapan layar 720p atau 1080p pada timestamp detik tertentu dalam waktu 4–7 detik tanpa perlu mengunduh seluruh file video.
@@ -103,7 +104,7 @@ Server `youtube-whisper` otomatis mendeteksi file ini, memutar giliran key, dan 
 
 | Nama Tool | Deskripsi | Parameter |
 | :--- | :--- | :--- |
-| `transcribe_youtube` | Unduh audio, chunking cerdas (<25MB), dan transkripsi verbatim lengkap dengan timestamp rapi (`.md` dan `_raw.json`). | `url` (str), `output_path` (str, opsional), `language` (str, opsional) |
+| `transcribe_youtube` | Unduh audio, chunking cerdas (<25MB), dan transkripsi verbatim lengkap dengan timestamp rapi (`.md` dan `_raw.json`) serta optimasi code-switching bilingual. | `url` (str), `output_path` (str, opsional), `language` (str, opsional), `glossary` (str, opsional) |
 | `extract_keyframe` | Ambil screenshot HD native (720p / 1080p) pada detik tertentu via HLS seek range dalam 4–7 detik. | `url` (str), `timestamp` (str, `HH:MM:SS`), `output_path` (str, opsional), `resolution` (int, default 720) |
 | `get_video_info` | Metadata ringkas video (judul, channel, durasi, status live). | `url` (str) |
 | `list_channel_videos` | Katalog daftar video suatu channel berurutan (exclude Shorts) dari video terlama ke terbaru. | `channel_url` (str), `limit` (int, default 30), `sort_order` (str, `oldest_first`/`newest_first`) |
@@ -127,7 +128,8 @@ whis-tube/
         ├── __init__.py     # Metadata package
         ├── __main__.py     # CLI entrypoint
         ├── server.py       # FastMCP server & registrasi tools
-        ├── audio.py        # Logika yt-dlp, SoX FLAC, silence-detect & chunking
+        ├── audio.py        # Logika yt-dlp, SoX FLAC, filter suara & chunking
+        ├── code_switch.py  # Ekstraksi glosarium, prompt bilingual & normalisasi fonetik
         ├── groq_pool.py    # Pool multi-key Groq & penanganan error 429
         ├── visual.py       # HLS range-seek frame grabber
         └── utils.py        # Utilitas format timestamp & channel parser
