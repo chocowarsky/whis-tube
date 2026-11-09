@@ -80,6 +80,8 @@ HALLUCINATION_PATTERNS: List[re.Pattern] = [
     re.compile(r"^(you[\.!\s]*){2,}$", re.IGNORECASE),
     re.compile(r"^(thank you[\.!\s]*){2,}$", re.IGNORECASE),
     re.compile(r"^(bye[\.!\s]*){2,}$", re.IGNORECASE),
+    re.compile(r"^sub\s*indo\s+by\b.*$", re.IGNORECASE),
+    re.compile(r"^(?:you\s+)*teksting\s+av\b.*$", re.IGNORECASE),
 ]
 
 # High-frequency Indonesian-English phonetic collisions
@@ -87,7 +89,7 @@ DEFAULT_PHONETIC_RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"\bbusai\s+fed\b", re.IGNORECASE), "Bursa Efek"),
     (re.compile(r"\bbursa\s+efed\b", re.IGNORECASE), "Bursa Efek"),
     (re.compile(r"\bbusai\b", re.IGNORECASE), "Bursa Efek"),
-    (re.compile(r"\bpam\s*fan\b", re.IGNORECASE), "Pump.fun"),
+    (re.compile(r"\b(?:pam\s*fan|pump\s*fund)\b", re.IGNORECASE), "Pump.fun"),
     (re.compile(r"\bGoldman\s+Sax\b", re.IGNORECASE), "Goldman Sachs"),
     (re.compile(r"\bjp\s+morgen\b", re.IGNORECASE), "JP Morgan"),
     (re.compile(r"\bStarling\b", re.IGNORECASE), "Starlink"),
@@ -261,6 +263,8 @@ def is_hallucination_segment(seg: Dict[str, Any]) -> bool:
         return True
 
     clean_text = text.strip(" .!?,:;\"'").lower()
+    if not clean_text:
+        return True
 
     # Check known boilerplate hallucinations
     for pat in HALLUCINATION_PATTERNS:
