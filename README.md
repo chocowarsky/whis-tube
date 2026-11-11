@@ -23,7 +23,7 @@
 - **Smart Silence-Detected Chunking (<25MB):** Automatically detects pauses and silence intervals to slice long audio (1–3+ hours) into ~10-minute segments. Requests strictly remain under Groq's 25 MB payload limit.
 - **Multi-Key Pool & 429 Failover:** Rotates across multiple Groq API keys seamlessly. When an HTTP 429 rate limit is encountered, the server reads the `retry-after` header, flags the key for cooldown, and transparently dispatches remaining chunks to another available key without failing the task.
 - **Rapid Visual Keyframe Extraction (HLS Range-Seek):** Extracts crisp native 720p/1080p frames in 4–7 seconds on exact timestamps without downloading the entire video file.
-- **Agent SOP Ready (`SKILL.md`):** Includes comprehensive research methodology guidelines for AI agents, preventing lazy summaries and mandating inline visual verification for charts, slides, and technical formulas.
+- **Autonomous Cold-Start Channel Research (`SKILL.md`):** Complete operational blueprint for AI coding agents to research entire YouTube channels from scratch—automatically enumerating uploads and livestreams chronologically, organizing clean workspaces (`analysis/`, `raw-transcripts/`, `catalog_video.md`, `catalog_livestream.md`), extracting 1080p visual proof, and generating in-depth intelligence reports.
 
 ---
 
