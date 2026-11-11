@@ -218,5 +218,5 @@ def extract_keyframe(
         "seconds": ts_seconds,
         "dimensions": dim_str,
         "image_path": str(target_file.resolve()),
-        "markdown_embed": f"![Visual Frame: {ts_formatted}]({target_file.as_posix()})\n*Tangkapan Layar: [{ts_formatted}]*",
+        "markdown_embed": f"![Visual Frame: {ts_formatted}]({target_file.as_posix()})\n*Screenshot: [{ts_formatted}]*",
     }

@@ -1,7 +1,7 @@
 ---
 name: youtube-whisper
 description: "Verbatim YouTube transcription (Whisper Large V3) and high-speed HD keyframe extraction pipeline for video intelligence."
-version: 1.1.0
+version: 1.2.0
 author: chocowarsky
 license: MIT
 metadata:
@@ -9,8 +9,6 @@ metadata:
 ---
 
 # YouTube Whisper Intelligence Skill (SOP)
-
-🌐 **[English Version](SKILL.md)** | **[Versi Bahasa Indonesia](SKILL.id.md)**
 
 Standardized pipeline for deep research on YouTube videos using verbatim (lossless word-for-word) transcription via Groq Whisper Large V3, bilingual Indonesian-English code-switching enhancements, and rapid visual HD frame extraction (720p/1080p) via HLS range-seek.
 
@@ -59,11 +57,14 @@ Standardized pipeline for deep research on YouTube videos using verbatim (lossle
   *Visual Evidence: [00:15:30] - Technical Architecture Diagram*
   ```
 
-### 3. Chronological Channel Catalogs (Oldest to Newest)
-- When analyzing an entire series, course, or channel history:
-  - Always catalog chronologically starting from the debut video (`#01 / #001`) forward to recent uploads (`#N`).
-  - Filter out YouTube Shorts (<60s).
-  - Use `list_channel_videos(channel_url, sort_order="oldest_first")`.
+### 3. Chronological Channel Catalogs & Status Management
+- **Master Catalog as the Single Source of Truth**:
+  - Always monitor, inspect, and maintain the channel catalog files (e.g. `catalog_video.md` and `catalog_livestream.md`) inside the channel directory as the authoritative single source of truth for queue discovery, progress tracking, and recording status transitions (from queued/pending to completed).
+  - **Identical Methodological Treatment for Videos & Livestreams**: Long-form regular uploaded videos and live stream broadcasts are functionally and structurally identical in this intelligence framework—both are full-length video artifacts requiring the exact same lossless verbatim transcription, visual HD keyframe extraction (720p/1080p), multimodal vision verification, and comprehensive reporting.
+  - **Strict YouTube Shorts Exclusion**: YouTube Shorts (<60s) are micro-content and are strictly excluded from both catalogs and the research pipeline.
+  - **Chronological Catalog Ordering**: When analyzing an entire series, course, or channel history, always catalog chronologically starting from the debut video (`#01 / #001`) forward to recent uploads (`#N`) using `list_channel_videos(channel_url, sort_order="oldest_first")`.
+  - **Catalog File Formatting & Clean Backup Policy**: Master catalog markdown files must strictly preserve Windows CRLF line endings (`\r\n`) across all modifications. Store any temporary backup in a scratch directory and never leave `.bak-*` files inside the channel directory.
+  - **Clean Channel Workspace Constraint**: Channel directories must remain clean and uncluttered, containing strictly the official artifacts (`analysis/`, `raw-transcripts/`, and the master catalog files). Never leave internal work logs (`_jobs/`), synthesis scratchpads (`_synthesis/`), or stale backup files (`.bak-*`) inside the channel root directory.
 
 ### 4. Anti-LaTeX Constraint for Chat Readability
 - Avoid wrapping monetary figures or mathematical expressions in LaTeX syntax (`$100`, `\approx`, `\rightarrow`) which breaks rendering in messaging platforms like Telegram.

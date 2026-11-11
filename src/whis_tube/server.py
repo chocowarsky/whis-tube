@@ -75,27 +75,27 @@ async def transcribe_youtube(
             None,
             lambda: _transcribe_video(url, output_path=output_path, language=language or None, glossary=glossary),
         )
-        glossary_info = f"- **Istilah Glosarium:** {res.get('glossary_terms_count', 0)}\n" if res.get('glossary_terms_count') else ""
-        phonetic_info = f"- **Koreksi Fonetik:** {res.get('phonetic_corrections_count', 0)}\n" if res.get('phonetic_corrections_count') else ""
+        glossary_info = f"- **Glossary Terms:** {res.get('glossary_terms_count', 0)}\n" if res.get('glossary_terms_count') else ""
+        phonetic_info = f"- **Phonetic Corrections:** {res.get('phonetic_corrections_count', 0)}\n" if res.get('phonetic_corrections_count') else ""
         return (
-            f"✅ Transkripsi Berhasil!\n\n"
-            f"- **Judul:** {res['title']}\n"
+            f"✅ Transcription Successful!\n\n"
+            f"- **Title:** {res['title']}\n"
             f"- **Channel:** {res['channel']}\n"
-            f"- **Durasi:** {res['duration']}\n"
-            f"- **Bahasa:** {res.get('language') or 'auto'}\n"
-            f"- **Total Segmen:** {res['total_segments']} ({res['total_words']:,} kata)\n"
-            f"- **Segmen Low-Confidence:** {res['low_confidence_segments']}\n"
+            f"- **Duration:** {res['duration']}\n"
+            f"- **Language:** {res.get('language') or 'auto'}\n"
+            f"- **Total Segments:** {res['total_segments']} ({res['total_words']:,} words)\n"
+            f"- **Low-Confidence Segments:** {res['low_confidence_segments']}\n"
             f"{glossary_info}"
             f"{phonetic_info}"
-            f"- **Waktu Proses:** {res['elapsed_seconds']}s\n"
-            f"- **File Markdown:** `{res['transcript_path']}`\n"
-            f"- **File Raw JSON:** `{res['raw_json_path']}`"
+            f"- **Processing Time:** {res['elapsed_seconds']}s\n"
+            f"- **Markdown File:** `{res['transcript_path']}`\n"
+            f"- **Raw JSON File:** `{res['raw_json_path']}`"
         )
     except QuotaExhausted as qe:
-        return f"⚠️ Groq Quota Exhausted: {qe}. Selesaikan pending chunks setelah cooldown."
+        return f"⚠️ Groq Quota Exhausted: {qe}. Resume pending chunks after cooldown."
     except Exception as exc:
         logger.error(f"Error during transcription: {exc}", exc_info=True)
-        return f"❌ Gagal melakukan transkripsi: {exc}"
+        return f"❌ Transcription failed: {exc}"
 
 
 # ── Tool 2: extract_keyframe ────────────────────────────────────────────────
@@ -125,16 +125,16 @@ async def extract_keyframe(
             lambda: _extract_keyframe(url, timestamp, output_path=output_path, resolution=resolution),
         )
         return (
-            f"🖼️ Keyframe Berhasil Diekstrak!\n\n"
+            f"🖼️ Keyframe Extracted Successfully!\n\n"
             f"- **Timestamp:** {res['timestamp']}\n"
-            f"- **Resolusi:** {res['dimensions']}\n"
-            f"- **Path File:** `{res['image_path']}`\n\n"
+            f"- **Resolution:** {res['dimensions']}\n"
+            f"- **File Path:** `{res['image_path']}`\n\n"
             f"**Markdown Embed Snippet:**\n"
             f"```markdown\n{res['markdown_embed']}\n```"
         )
     except Exception as exc:
         logger.error(f"Error extracting keyframe: {exc}", exc_info=True)
-        return f"❌ Gagal mengekstrak keyframe: {exc}"
+        return f"❌ Failed to extract keyframe: {exc}"
 
 
 # ── Tool 3: get_video_info ──────────────────────────────────────────────────
@@ -160,18 +160,18 @@ async def get_video_info(url: str) -> str:
             vc_str = "N/A"
         vid_id = info.get("id") or "video"
         return (
-            f"ℹ️ **Informasi Video YouTube**\n\n"
-            f"- **Judul:** {info.get('title')}\n"
+            f"ℹ️ **YouTube Video Information**\n\n"
+            f"- **Title:** {info.get('title')}\n"
             f"- **Channel:** {info.get('channel') or info.get('uploader')}\n"
-            f"- **Durasi:** {fmt_ts(dur)} ({dur} detik)\n"
-            f"- **Tanggal Upload:** {info.get('upload_date') or 'N/A'}\n"
-            f"- **Status Live:** {info.get('live_status') or 'vod/uploaded'}\n"
-            f"- **Bahasa Asal:** {info.get('language') or 'auto'}\n"
+            f"- **Duration:** {fmt_ts(dur)} ({dur} seconds)\n"
+            f"- **Upload Date:** {info.get('upload_date') or 'N/A'}\n"
+            f"- **Live Status:** {info.get('live_status') or 'vod/uploaded'}\n"
+            f"- **Source Language:** {info.get('language') or 'auto'}\n"
             f"- **View Count:** {vc_str}\n"
             f"- **URL:** https://www.youtube.com/watch?v={vid_id}"
         )
     except Exception as exc:
-        return f"❌ Gagal mengambil informasi video: {exc}"
+        return f"❌ Failed to retrieve video information: {exc}"
 
 
 # ── Tool 4: list_channel_videos ─────────────────────────────────────────────
@@ -198,11 +198,11 @@ async def list_channel_videos(
             lambda: _list_channel_videos(channel_url, limit=limit, sort_order=sort_order),
         )
         if not videos:
-            return f"Tidak ada video ditemukan di {channel_url}."
+            return f"No videos found for {channel_url}."
 
         lines = [
-            f"📋 **Katalog Video Channel** ({len(videos)} video, urutan: {sort_order})\n",
-            "| No | Tanggal | Durasi | Judul | URL |",
+            f"📋 **Channel Video Catalog** ({len(videos)} videos, sort: {sort_order})\n",
+            "| No | Date | Duration | Title | URL |",
             "| :--- | :--- | :--- | :--- | :--- |",
         ]
         for idx, v in enumerate(videos, 1):
@@ -210,11 +210,11 @@ async def list_channel_videos(
             if len(date_str) == 8:
                 date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
             clean_title = v["title"].replace("|", "/")
-            lines.append(f"| {idx:02d} | {date_str} | {v['duration_formatted']} | {clean_title} | [Tonton]({v['url']}) |")
+            lines.append(f"| {idx:02d} | {date_str} | {v['duration_formatted']} | {clean_title} | [Watch]({v['url']}) |")
 
         return "\n".join(lines)
     except Exception as exc:
-        return f"❌ Gagal mengambil daftar video channel: {exc}"
+        return f"❌ Failed to list channel videos: {exc}"
 
 
 # ── Tool 5: check_groq_quota ────────────────────────────────────────────────
@@ -226,17 +226,17 @@ async def check_groq_quota() -> str:
     try:
         keys = load_groq_keys()
         if not keys:
-            return "⚠️ Tidak ada API key Groq yang terdeteksi (periksa GROQ_API_KEY atau ~/.config/groq/keys.json)."
+            return "⚠️ No Groq API keys detected (check GROQ_API_KEY or ~/.config/groq/keys.json)."
 
         pool = KeyPool(keys)
         now = time.time()
         live_cooling = sum(1 for i, (until, _) in pool.cool.items() if i not in pool.dead and until > now)
         ready_count = pool.live() - live_cooling
         lines = [
-            f"⚡ **Groq Key Pool Status** ({len(keys)} total key terdaftar)\n",
-            f"- **Model Aktif:** `{MODEL}`",
-            f"- **Key Siap Digunakan:** {ready_count} / {len(keys)}\n",
-            "| Key ID | Status | Cooldown Sisa | Reset Time |",
+            f"⚡ **Groq Key Pool Status** ({len(keys)} total keys registered)\n",
+            f"- **Active Model:** `{MODEL}`",
+            f"- **Keys Ready:** {ready_count} / {len(keys)}\n",
+            "| Key ID | Status | Cooldown Remaining | Reset Time |",
             "| :--- | :--- | :--- | :--- |",
         ]
         for idx in range(len(keys)):
@@ -255,7 +255,7 @@ async def check_groq_quota() -> str:
 
         return "\n".join(lines)
     except Exception as exc:
-        return f"❌ Gagal memeriksa kuota Groq: {exc}"
+        return f"❌ Failed to check Groq quota: {exc}"
 
 
 def main():

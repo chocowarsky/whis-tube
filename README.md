@@ -8,9 +8,6 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Groq Whisper Large V3](https://img.shields.io/badge/Whisper-Large%20V3-orange.svg)](https://console.groq.com)
 [![FastMCP](https://img.shields.io/badge/MCP-FastMCP-green.svg)](https://github.com/jlowin/fastmcp)
-
-🌐 **[English](README.md)** | **[Bahasa Indonesia](README.id.md)**
-
 </div>
 
 ---
@@ -120,9 +117,7 @@ whis-tube/
 ├── .env.example            # Environment variables template
 ├── pyproject.toml          # Package configuration & dependencies
 ├── SKILL.md                # AI Agent Research Methodology & SOP (English)
-├── SKILL.id.md             # AI Agent Research Methodology & SOP (Indonesian)
 ├── README.md               # English Documentation
-├── README.id.md            # Indonesian Documentation
 └── src/
     └── whis_tube/
         ├── __init__.py     # Package metadata
