@@ -1,7 +1,7 @@
 ---
 name: youtube-whisper
 description: "Verbatim YouTube transcription (Whisper Large V3), 1080p keyframe intelligence, and autonomous channel research SOP."
-version: 1.5.0
+version: 1.6.0
 author: chocowarsky
 license: MIT
 metadata:
@@ -15,11 +15,12 @@ Standardized, autonomous end-to-end research pipeline for YouTube channels and l
 ## When to Use This Skill
 
 1. **Full-Channel Research from Scratch (Cold Start)**: When tasked with analyzing an entire YouTube channel, playlist, or video archive from zero—including automatic workspace setup, chronological cataloging, transcription, visual proof extraction, and structured analysis reports.
-2. **Long-Form Video & Livestream Intelligence**: When analyzing videos or completed livestreams ranging from 10 minutes to multi-hour broadcasts (podcasts, market streams, technical presentations).
-3. **Strict Verbatim Accuracy Requirements (Ground Truth)**: Never rely on YouTube's default auto-captions, which frequently censor terms, drop punctuation, misspell financial tickers, or omit critical numbers.
-4. **Bilingual Indonesian-English Technical Content**: When transcribing Indonesian content discussing crypto, finance, programming, or tech where speakers mix English loanwords and terminology (code-switching).
-5. **Visual Ground-Truth Verification (Charts, Slides, Code, Formulas)**: When speakers make visual references ("as seen on this chart", "looking at this slide") or pause for silent B-roll segments, trigger `extract_keyframe` at that exact timestamp and inspect it with vision tools.
-6. **Large Historical Backlogs & Timeframe Re-Research**: When auditing, upgrading, or processing large backlogs of videos/streams (e.g. "research 3 bulan terakhir", 20+ items). Never shoulder high volumes sequentially in a single session; fan out across parallel sub-agents (`delegate_task`).
+2. **Ad-Hoc / Single-Video Ingestion from New Channels**: When the user provides a single video URL from a channel not yet tracked in the workspace, immediately auto-detect the channel, scaffold the standard workspace directory tree, seed the master catalog, and process the video end-to-end without asking manual setup questions.
+3. **Long-Form Video & Livestream Intelligence**: When analyzing videos or completed livestreams ranging from 10 minutes to multi-hour broadcasts (podcasts, market streams, technical presentations).
+4. **Strict Verbatim Accuracy Requirements (Ground Truth)**: Never rely on YouTube's default auto-captions, which frequently censor terms, drop punctuation, misspell financial tickers, or omit critical numbers.
+5. **Bilingual Indonesian-English Technical Content**: When transcribing Indonesian content discussing crypto, finance, programming, or tech where speakers mix English loanwords and terminology (code-switching).
+6. **Visual Ground-Truth Verification (Charts, Slides, Code, Formulas)**: When speakers make visual references ("as seen on this chart", "looking at this slide") or pause for silent B-roll segments, trigger `extract_keyframe` at that exact timestamp and inspect it with vision tools.
+7. **Large Historical Backlogs & Timeframe Re-Research**: When auditing, upgrading, or processing large backlogs of videos/streams (e.g. "research 3 bulan terakhir", 20+ items). Never shoulder high volumes sequentially in a single session; fan out across parallel sub-agents (`delegate_task`).
 
 ---
 
@@ -35,6 +36,7 @@ Standardized, autonomous end-to-end research pipeline for YouTube channels and l
 
 ## Key Management & Configuration
 
+- **Canonical Codebase (`whis-tube`)**: All transcription, keyframe extraction, and channel catalog tooling lives exclusively in `~/Documents/whis-tube` (GitHub: `chocowarsky/whis-tube`) and runs via the `youtube-whisper` FastMCP server (`uv run --directory /home/warsky/Documents/whis-tube python -m whis_tube.server`). Never create, maintain, or fall back to ad-hoc CLI scripts in `~/Documents/hermes-trading/tools/`; keep `~/Documents/hermes-trading/` strictly for research domains (`youtube-research/`, `akademi-crypto/`, `market-research/`).
 - **Key Pool File**: Stored at `~/.config/groq/keys.json` (`/home/warsky/.config/groq/keys.json`).
 - **Format**: JSON array of string API keys (or objects with `key`/`api_key`). Pooled across 14 independent Groq organization accounts to multiply rate limits (7,200 audio seconds/hour and 28,800 audio seconds/day per key).
 - **Registration**: Registered in `~/.hermes/config.yaml` under MCP server `youtube-whisper` via environment variable `GROQ_KEYS_PATH: /home/warsky/.config/groq/keys.json`.
@@ -46,6 +48,17 @@ Standardized, autonomous end-to-end research pipeline for YouTube channels and l
 ## Autonomous Cold-Start Channel Research Workflow
 
 If a user instructs you to research a YouTube channel from scratch (e.g., *"Research YouTube channel `@example` end-to-end"*), execute the following phases automatically without asking for manual setup instructions:
+
+### Automatic Workspace Provisioning for Uncataloged Channels (Single-Video Ingest)
+
+When the user shares a specific YouTube video link from a new creator or channel that does not yet exist in `<workspace_root>`:
+1. **Auto-Detect Channel Identity**: Query video metadata via `get_video_info(url)` to resolve the canonical channel title and URL. Derive a clean URL-friendly kebab-case directory slug (e.g. `Ternak Uang` -> `ternak-uang`).
+2. **Auto-Scaffold Workspace Hierarchy**: Immediately initialize the standardized directory tree under `youtube-research/<channel-slug>/`:
+   - `analysis/videos/frames/` and `analysis/livestreams/frames/`
+   - `raw-transcripts/videos/` and `raw-transcripts/livestreams/`
+   - `catalog_video.md` and `catalog_livestream.md` (formatted with CRLF line endings `\r\n`).
+3. **Seed Master Catalog**: Record the ingested video as Row #1 (`⏳ Queued` or `⏳ In Progress`) in `catalog_video.md` (or `catalog_livestream.md` if it was a stream), ensuring consistent tracking from day one.
+4. **Execute Full Standard Pipeline**: Proceed seamlessly through verbatim transcription (`transcribe_youtube`), 1080p Full HD keyframe extraction (`extract_keyframe`), multimodal visual verification, comprehensive report authoring (`<slug>_vid_<num>_<video_id>_<sanitized_title>.md`), and flip catalog status to `✅ **SELESAI**`. Never reject an uncataloged link or ask for manual folder creation.
 
 ### Phase 1: Channel Enumeration & Workspace Blueprint
 1. **Enumerate Both Uploads, Livestreams & Playlists**:
