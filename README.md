@@ -56,7 +56,17 @@ youtube-whisper
 
 ## 🔌 MCP Client Configuration
 
-### 1. Claude Desktop / Claude Code / Cursor
+### 1. Google Antigravity (IDE, CLI `agy` & Desktop)
+`whis-tube` ships as a native Antigravity plugin (`plugin.json`, `mcp_config.json`, `skills/youtube-whisper/SKILL.md`, and `assets/logo.svg`). Install it globally once so it works across **Antigravity IDE**, **Antigravity CLI (`agy`)**, and **Antigravity Desktop**:
+
+```bash
+agy plugin install /path/to/whis-tube
+agy plugin validate --strict ~/.gemini/config/plugins/whis-tube
+```
+
+Or add the server entry directly to `~/.gemini/config/mcp_config.json` (useful if you only want the MCP tools without the plugin bundle).
+
+### 2. Claude Desktop / Claude Code / Cursor
 Add the server entry to your MCP configuration file (e.g., `claude_desktop_config.json` or `.mcp.json`):
 
 ```json
@@ -80,7 +90,7 @@ Add the server entry to your MCP configuration file (e.g., `claude_desktop_confi
 }
 ```
 
-### 2. Multi-Key Pool (Recommended for Heavy Research)
+### 3. Multi-Key Pool (Recommended for Heavy Research)
 If you maintain multiple free-tier Groq API keys to maximize hourly/daily quotas, store them in `~/.config/groq/keys.json`:
 
 ```json
@@ -113,11 +123,18 @@ The `youtube-whisper` server automatically detects this pool file, manages round
 
 ```text
 whis-tube/
-├── .mcp.json               # Default MCP client configuration
-├── .env.example            # Environment variables template
-├── pyproject.toml          # Package configuration & dependencies
-├── SKILL.md                # AI Agent Research Methodology & SOP (English)
-├── README.md               # English Documentation
+├── plugin.json               # Antigravity plugin manifest
+├── mcp_config.json           # Antigravity MCP server configuration
+├── .mcp.json                 # Claude Code / Cursor MCP configuration
+├── .env.example              # Environment variables template
+├── pyproject.toml            # Package configuration & dependencies
+├── SKILL.md                  # AI Agent Research Methodology & SOP (English)
+├── README.md                 # English Documentation
+├── assets/
+│   └── logo.svg              # Plugin icon for Antigravity UI
+├── skills/
+│   └── youtube-whisper/
+│       └── SKILL.md          # Bundled Antigravity plugin skill
 └── src/
     └── whis_tube/
         ├── __init__.py     # Package metadata

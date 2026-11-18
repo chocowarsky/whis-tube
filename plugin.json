@@ -1,0 +1,16 @@
+{
+  "name": "whis-tube",
+  "displayName": "Whis-Tube (YouTube Whisper)",
+  "version": "1.1.0",
+  "description": "High-fidelity YouTube verbatim transcription (Groq Whisper Large V3), bilingual code-switching, and 1080p HLS keyframe extraction.",
+  "logo": "assets/logo.svg",
+  "author": {
+    "name": "chocowarsky"
+  },
+  "repository": "https://github.com/chocowarsky/whis-tube",
+  "suggestedPrompts": [
+    "Transcribe this YouTube video verbatim with timestamps and code-switching",
+    "Extract a 1080p keyframe from this YouTube video at a specific timestamp",
+    "List and research all videos from this YouTube channel chronologically"
+  ]
+}

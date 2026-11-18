@@ -8,6 +8,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Ensure user-local binary dir (~/.local/bin) is on PATH for GUI/IDE-launched MCP processes
+if os.name != "nt":
+    _local_bin = str(pathlib.Path.home() / ".local" / "bin")
+    _current_path = os.environ.get("PATH", "")
+    if pathlib.Path(_local_bin).is_dir() and _local_bin not in _current_path.split(os.pathsep):
+        os.environ["PATH"] = f"{_local_bin}{os.pathsep}{_current_path}" if _current_path else _local_bin
+
 # Groq API configuration
 GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 MODEL = os.environ.get("WHISPER_MODEL", "whisper-large-v3")
@@ -15,7 +22,7 @@ GROQ_API_KEY_ENV = os.environ.get("GROQ_API_KEY", "").strip()
 
 # Path to groq keys JSON file (e.g. {"keys": ["gsk_...", "gsk_..."]})
 DEFAULT_KEYS_PATH = pathlib.Path.home() / ".config" / "groq" / "keys.json"
-KEYS_PATH = pathlib.Path(os.environ.get("GROQ_KEYS_PATH", str(DEFAULT_KEYS_PATH))).expanduser()
+KEYS_PATH = pathlib.Path(os.environ.get("GROQ_KEYS_PATH") or str(DEFAULT_KEYS_PATH)).expanduser()
 
 # Scratch cache directory
 if os.name == "nt":
