@@ -31,7 +31,7 @@ from .config import (
 )
 
 logger = logging.getLogger("whis-tube.groq")
-_TRY_AGAIN_RE = re.compile(r"try again in ((?:\d+(?:\.\d+)?(?:h|ms|m|s))+)", re.I)
+_DURATION_UNITS = {"ms": 0.001, "h": 3600.0, "m": 60.0, "s": 1.0}
 _PLACEHOLDER_TOKENS = ("PASTE", "YOUR", "EXAMPLE", "PLACEHOLDER", "HERE", "XXXX", "REDACT", "<", ">")
 
 
@@ -168,6 +168,57 @@ def redact(text: str) -> str:
     return text
 
 
+def _scan_number(text: str, pos: int) -> Tuple[Optional[float], int]:
+    """Scan an unsigned integer or decimal literal starting at ``pos``."""
+    n = len(text)
+    start = pos
+    while pos < n and text[pos].isdigit():
+        pos += 1
+    if pos == start:
+        return None, start
+    if pos < n and text[pos] == ".":
+        frac_pos = pos + 1
+        while frac_pos < n and text[frac_pos].isdigit():
+            frac_pos += 1
+        if frac_pos > pos + 1:
+            pos = frac_pos
+    return float(text[start:pos]), pos
+
+
+def _parse_try_again_duration(body: str) -> Optional[float]:
+    """Parse ``try again in <duration>`` in O(N) time without regex backtracking."""
+    if not body:
+        return None
+    lower = body.lower()
+    marker = "try again in "
+    n = len(lower)
+    search_from = 0
+    while True:
+        idx = lower.find(marker, search_from)
+        if idx < 0:
+            return None
+        pos = idx + len(marker)
+        total = 0.0
+        matched = False
+        while pos < n:
+            num, next_pos = _scan_number(lower, pos)
+            if num is None:
+                break
+            unit = None
+            for suffix in ("ms", "h", "m", "s"):
+                if lower.startswith(suffix, next_pos):
+                    unit = suffix
+                    pos = next_pos + len(suffix)
+                    break
+            if unit is None:
+                break
+            total += num * _DURATION_UNITS[unit]
+            matched = True
+        if matched:
+            return total
+        search_from = idx + len(marker)
+
+
 def parse_wait_s(headers: Dict[str, str], body: str) -> Optional[float]:
     """Parse remaining cooldown seconds from retry-after header or Groq response text."""
     ra = headers.get("retry-after") or headers.get("Retry-After")
@@ -176,11 +227,7 @@ def parse_wait_s(headers: Dict[str, str], body: str) -> Optional[float]:
             return float(ra)
         except ValueError:
             pass
-    m = _TRY_AGAIN_RE.search(body or "")
-    if not m:
-        return None
-    units = {"h": 3600.0, "m": 60.0, "s": 1.0, "ms": 0.001}
-    return sum(float(n) * units[u] for n, u in re.findall(r"(\d+(?:\.\d+)?)(ms|h|m|s)", m.group(1)))
+    return _parse_try_again_duration(body or "")
 
 
 def limit_kind(body: str) -> str:

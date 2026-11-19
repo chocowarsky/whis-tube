@@ -190,7 +190,7 @@ def _extract_binaries_from_tree(
             tmp_path = target_path.with_suffix(".tmp")
             shutil.copy2(item, tmp_path)
             if os.name != "nt":
-                os.chmod(tmp_path, 0o755)
+                os.chmod(tmp_path, 0o700)
             os.replace(tmp_path, target_path)
             found[logical_name] = target_path
     return found
@@ -469,7 +469,7 @@ if leaked:
 """
         pre_commit.write_text(hook_script, encoding="utf-8")
         if os.name != "nt":
-            os.chmod(pre_commit, 0o755)
+            os.chmod(pre_commit, 0o700)
 
     return keys_path
 
