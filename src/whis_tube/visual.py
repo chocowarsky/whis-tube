@@ -8,6 +8,7 @@ import pathlib
 from typing import Any, Dict
 
 from .config import SCRATCH_DIR, YTDLP_BASE
+from .runtime import ensure_runtime_binaries
 from .utils import fmt_ts, parse_ts, run_command, sanitize_filename
 
 logger = logging.getLogger("whis-tube.visual")
@@ -34,6 +35,7 @@ def extract_keyframe(
     Returns:
         Dict with image_path, timestamp, resolution, and markdown_embed string.
     """
+    ensure_runtime_binaries()
     ts_seconds = parse_ts(timestamp)
     ts_formatted = fmt_ts(ts_seconds)
     ts_tag = ts_formatted.replace(":", "")

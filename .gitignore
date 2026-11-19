@@ -38,3 +38,7 @@ transcripts/
 .env.local
 *.pem
 *.key
+keys.local.json
+
+# Local self-contained binaries
+.bin/

@@ -36,12 +36,16 @@ Standardized, autonomous end-to-end research pipeline for YouTube channels and l
 
 ## Key Management & Configuration
 
-- **Canonical Codebase (`whis-tube`)**: All transcription, keyframe extraction, and channel catalog tooling lives exclusively in `~/Documents/whis-tube` (GitHub: `chocowarsky/whis-tube`) and runs via the `youtube-whisper` FastMCP server (`uv run --directory /home/warsky/Documents/whis-tube python -m whis_tube.server`). Never create, maintain, or fall back to ad-hoc CLI scripts in `~/Documents/hermes-trading/tools/`; keep `~/Documents/hermes-trading/` strictly for research domains (`youtube-research/`, `akademi-crypto/`, `market-research/`).
-- **Key Pool File**: Stored at `~/.config/groq/keys.json` (`/home/warsky/.config/groq/keys.json`).
-- **Format**: JSON array of string API keys (or objects with `key`/`api_key`). Pooled across 14 independent Groq organization accounts to multiply rate limits (7,200 audio seconds/hour and 28,800 audio seconds/day per key).
-- **Registration**: Registered in `~/.hermes/config.yaml` under MCP server `youtube-whisper` via environment variable `GROQ_KEYS_PATH: /home/warsky/.config/groq/keys.json`.
-- **Single-Key Fallback**: Core Hermes STT and single-key fallbacks read `GROQ_API_KEY` from `~/.hermes/.env` or profile-specific `.env` files.
-- **Quota & Health**: Invoke `check_groq_quota` to inspect per-key cooldowns and remaining daily quotas.
+- **Zero-Sudo Bootstrap (`bootstrap.py`)**: If `ffmpeg`, `ffprobe`, `uv`, or `.venv` are missing on a fresh machine, run `python3 bootstrap.py` from the `whis-tube` root directory without `sudo`. All binaries install rootlessly into `./.bin/` and `./.venv/`.
+- **Canonical Codebase (`whis-tube`)**: All transcription, keyframe extraction, and channel catalog tooling lives in `whis-tube` (GitHub: `chocowarsky/whis-tube`) and runs via the `youtube-whisper` FastMCP server (`python3 bootstrap.py --serve` or `./.venv/bin/python -m whis_tube.server`) or directly via `./.venv/bin/whis-tube`. Never create ad-hoc CLI scripts outside `whis-tube`.
+- **Key Discovery Priority (Hot-Reloaded, Never Expose Raw Keys)**:
+  1. `<repo_root>/keys.json` (primary drop-in file right inside `whis-tube`; protected via `chmod 600`, `git --skip-worktree`, and `.git/hooks/pre-commit`)
+  2. `<repo_root>/keys.local.json` and `<workspace>/keys.json`
+  3. `GROQ_KEYS_PATH` environment variable
+  4. `GROQ_API_KEY` environment variable / `.env`
+  5. `~/.config/groq/keys.json` (global pooled fallback)
+- **Format**: JSON object `{"keys": ["gsk_...", ...]}` or JSON array `["gsk_...", ...]`. Placeholder strings are ignored automatically.
+- **Quota & Health**: Invoke `check_groq_quota` (or `./.venv/bin/whis-tube --check-quota`) to inspect per-key cooldowns, active sources, and binary readiness.
 
 ---
 

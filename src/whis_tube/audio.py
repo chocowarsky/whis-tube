@@ -14,8 +14,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .config import (
     CKPT_ROOT,
+    DEFAULT_KEYS_PATH,
     MAX_UPLOAD_BYTES,
     MODEL,
+    REPO_ROOT,
     SCRATCH_DIR,
     SEARCH_BACK_S,
     SEARCH_FWD_S,
@@ -23,6 +25,7 @@ from .config import (
     TARGET_CHUNK_S,
     YTDLP_BASE,
 )
+from .runtime import ensure_runtime_binaries
 from .code_switch import (
     build_whisper_prompt,
     extract_metadata_terms,
@@ -421,9 +424,13 @@ def transcribe_video(
     glossary: str = "",
 ) -> Dict[str, Any]:
     """Run full verbatim audio transcription pipeline with multi-key Groq Whisper Large V3."""
+    ensure_runtime_binaries()
     keys = load_groq_keys()
     if not keys:
-        raise RuntimeError("No Groq API keys found. Set GROQ_API_KEY or configure ~/.config/groq/keys.json")
+        raise RuntimeError(
+            f"No valid Groq API keys found. Open {REPO_ROOT / 'keys.json'} and paste your gsk_... key(s), "
+            f"or configure {DEFAULT_KEYS_PATH}."
+        )
     pool = KeyPool(keys)
 
     info = get_video_info(url)

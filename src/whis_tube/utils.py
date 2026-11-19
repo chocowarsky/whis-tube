@@ -10,6 +10,7 @@ import subprocess
 from typing import Any, Dict, List, Optional
 
 from .config import YTDLP_BASE
+from .runtime import ensure_runtime_binaries
 
 
 def fmt_ts(seconds: float) -> str:
@@ -77,6 +78,8 @@ def run_command(
     timeout: Optional[float] = None,
 ) -> subprocess.CompletedProcess:
     """Run CLI subprocess with text output capture and optional timeout."""
+    if cmd and cmd[0] in ("ffmpeg", "ffprobe"):
+        ensure_runtime_binaries()
     return subprocess.run(cmd, capture_output=True, text=True, check=check, timeout=timeout)
 
 

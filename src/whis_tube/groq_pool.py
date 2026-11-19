@@ -15,44 +15,147 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+from dotenv import dotenv_values
 
 from .code_switch import is_hallucination_segment
 from .config import (
+    DEFAULT_KEYS_PATH,
     GROQ_API_KEY_ENV,
     GROQ_URL,
     KEY_STATE_PATH,
     KEYS_PATH,
+    LOCAL_KEYS_PATHS,
     MODEL,
     QUOTA_MAX_WAIT_S,
+    REPO_ROOT,
 )
 
 logger = logging.getLogger("whis-tube.groq")
 _TRY_AGAIN_RE = re.compile(r"try again in ((?:\d+(?:\.\d+)?(?:h|ms|m|s))+)", re.I)
+_PLACEHOLDER_TOKENS = ("PASTE", "YOUR", "EXAMPLE", "PLACEHOLDER", "HERE", "XXXX", "REDACT", "<", ">")
+
+
+def is_valid_groq_key(key: Any) -> bool:
+    """Return True if key looks like a real Groq key rather than a placeholder template."""
+    if not isinstance(key, str):
+        return False
+    cleaned = key.strip()
+    if not cleaned.startswith("gsk_") or len(cleaned) < 30:
+        return False
+    upper = cleaned.upper()
+    return not any(tok in upper for tok in _PLACEHOLDER_TOKENS)
+
+
+def _extract_keys_from_json(path: pathlib.Path) -> List[str]:
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            raw_list = data.get("keys", [])
+        elif isinstance(data, list):
+            raw_list = data
+        else:
+            raw_list = []
+
+        found: List[str] = []
+        for entry in raw_list:
+            if isinstance(entry, str):
+                candidate = entry.strip()
+            elif isinstance(entry, dict):
+                candidate = str(entry.get("key") or entry.get("api_key") or "").strip()
+            else:
+                candidate = ""
+            if is_valid_groq_key(candidate):
+                found.append(candidate)
+        return found
+    except Exception as e:
+        logger.warning(f"Failed to read keys from {path}: {e}")
+        return []
+
+
+def load_groq_keys_with_sources() -> Tuple[List[str], List[str]]:
+    """Hot-load valid Groq API keys across local repo keys.json, workspace, .env, and ~/.config/groq/keys.json."""
+    keys: List[str] = []
+    sources: List[str] = []
+
+    def _add_key(candidate: str) -> bool:
+        if is_valid_groq_key(candidate) and candidate not in keys:
+            keys.append(candidate)
+            return True
+        return False
+
+    # 1. Gather JSON key files in priority order (repo-local first for zero-friction portability)
+    candidate_files: List[Tuple[pathlib.Path, str]] = [
+        (LOCAL_KEYS_PATHS[0], f"{LOCAL_KEYS_PATHS[0].name} (project)"),
+        (LOCAL_KEYS_PATHS[1], f"{LOCAL_KEYS_PATHS[1].name} (project)"),
+        (pathlib.Path.cwd() / "keys.json", "keys.json (workspace)"),
+    ]
+
+    env_dotenv_files = [REPO_ROOT / ".env", pathlib.Path.cwd() / ".env"]
+    dotenv_maps = []
+    for env_path in env_dotenv_files:
+        if env_path.is_file():
+            try:
+                dotenv_maps.append(dotenv_values(env_path))
+            except Exception:
+                pass
+
+    env_keys_path = os.environ.get("GROQ_KEYS_PATH", "").strip()
+    if not env_keys_path:
+        for dmap in dotenv_maps:
+            val = (dmap.get("GROQ_KEYS_PATH") or "").strip()
+            if val:
+                env_keys_path = val
+                break
+
+    if env_keys_path:
+        candidate_files.append((pathlib.Path(env_keys_path).expanduser(), "GROQ_KEYS_PATH"))
+    candidate_files.append((KEYS_PATH, str(KEYS_PATH)))
+    candidate_files.append((DEFAULT_KEYS_PATH, "~/.config/groq/keys.json"))
+
+    seen_paths: set[pathlib.Path] = set()
+    for path, label in candidate_files:
+        try:
+            resolved = path.expanduser().resolve()
+        except OSError:
+            resolved = path
+        if resolved in seen_paths:
+            continue
+        seen_paths.add(resolved)
+
+        if path.is_file() and os.name != "nt" and (path.parent == REPO_ROOT or path.parent == pathlib.Path.cwd()):
+            try:
+                os.chmod(path, 0o600)
+            except OSError:
+                pass
+
+        extracted = _extract_keys_from_json(path)
+        added_count = sum(1 for k in extracted if _add_key(k))
+        if added_count:
+            sources.append(f"{label} ({added_count})")
+
+    # 2. Check environment / .env GROQ_API_KEY values (comma-separated supported)
+    env_candidates = [os.environ.get("GROQ_API_KEY", "").strip(), GROQ_API_KEY_ENV]
+    for dmap in dotenv_maps:
+        env_candidates.append(str(dmap.get("GROQ_API_KEY") or "").strip())
+
+    env_added = 0
+    for raw_env in env_candidates:
+        if not raw_env:
+            continue
+        for part in raw_env.split(","):
+            if _add_key(part.strip()):
+                env_added += 1
+    if env_added:
+        sources.append(f"GROQ_API_KEY (.env/env) ({env_added})")
+
+    return keys, sources
 
 
 def load_groq_keys() -> List[str]:
-    """Load API keys from environment variable or JSON config file."""
-    keys: List[str] = []
-    env_keys = os.environ.get("GROQ_API_KEY", "").strip() or GROQ_API_KEY_ENV
-    if env_keys:
-        # Support comma-separated keys in GROQ_API_KEY
-        keys.extend([k.strip() for k in env_keys.split(",") if k.strip()])
-
-    if KEYS_PATH.exists():
-        try:
-            data = json.loads(KEYS_PATH.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                file_keys = data.get("keys", [])
-            elif isinstance(data, list):
-                file_keys = data
-            else:
-                file_keys = []
-            for k in file_keys:
-                if isinstance(k, str) and k.strip() and k.strip() not in keys:
-                    keys.append(k.strip())
-        except Exception as e:
-            logger.warning(f"Failed to read keys from {KEYS_PATH}: {e}")
-
+    """Load API keys from local keys.json, environment variables, or ~/.config/groq/keys.json."""
+    keys, _ = load_groq_keys_with_sources()
     return keys
 
 
@@ -104,7 +207,10 @@ class KeyPool:
         max_wait: Optional[float] = None,
     ):
         if not keys:
-            raise ValueError(f"No Groq API keys provided or found in {KEYS_PATH}")
+            raise ValueError(
+                f"No valid Groq API keys found. Paste your key(s) into {REPO_ROOT / 'keys.json'} "
+                f"or {DEFAULT_KEYS_PATH}."
+            )
         self._lock = threading.RLock()
         self.keys = keys
         self.ids = [hashlib.sha256(k.encode()).hexdigest()[:12] for k in keys]

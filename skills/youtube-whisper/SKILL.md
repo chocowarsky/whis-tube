@@ -36,12 +36,17 @@ Standardized, autonomous end-to-end research pipeline for YouTube channels and l
 
 ## Key Management & Configuration
 
-- **Canonical Codebase (`whis-tube`)**: All transcription, keyframe extraction, and channel catalog tooling lives in `whis-tube` (GitHub: `chocowarsky/whis-tube`) and runs via the `youtube-whisper` FastMCP server.
-- **Key Pool File**: Stored at `~/.config/groq/keys.json`.
-- **Format**: JSON array of string API keys or `{"keys": ["gsk_...", ...]}`. Pooled across independent Groq organization accounts to multiply rate limits (7,200 audio seconds/hour and 28,800 audio seconds/day per key).
-- **Single-Key Fallback**: Set `GROQ_API_KEY` in environment or `.env` if not using `keys.json`.
-- **Antigravity Registration (IDE, CLI & Desktop)**: Installed as an Antigravity plugin (`~/.gemini/config/plugins/whis-tube`) or configured globally in `~/.gemini/config/mcp_config.json`.
-- **Quota & Health**: Invoke `check_groq_quota` to inspect per-key cooldowns and remaining daily quotas.
+- **Zero-Sudo Bootstrap (`bootstrap.py`)**: If `ffmpeg`, `ffprobe`, `uv`, or `.venv` are missing on a fresh machine, run `python3 bootstrap.py` from the `whis-tube` root directory without `sudo`. All binaries install rootlessly into `./.bin/` and `./.venv/`.
+- **Canonical Codebase (`whis-tube`)**: All transcription, keyframe extraction, and channel catalog tooling lives in `whis-tube` (GitHub: `chocowarsky/whis-tube`) and runs via the `youtube-whisper` FastMCP server (`python3 bootstrap.py --serve` or `./.venv/bin/python -m whis_tube.server`) or directly via `./.venv/bin/whis-tube`.
+- **Key Discovery Priority (Hot-Reloaded, Never Expose Raw Keys)**:
+  1. `<repo_root>/keys.json` (primary drop-in file right inside `whis-tube`; protected via `chmod 600`, `git --skip-worktree`, and `.git/hooks/pre-commit`)
+  2. `<repo_root>/keys.local.json` and `<workspace>/keys.json`
+  3. `GROQ_KEYS_PATH` environment variable
+  4. `GROQ_API_KEY` environment variable / `.env`
+  5. `~/.config/groq/keys.json` (global pooled fallback)
+- **Format**: JSON object `{"keys": ["gsk_...", ...]}` or JSON array `["gsk_...", ...]`. Placeholder strings are ignored automatically.
+- **Antigravity Registration (IDE, CLI & Desktop)**: Installed automatically by `python3 bootstrap.py` into `~/.gemini/config/plugins/whis-tube` and `~/.gemini/config/mcp_config.json`.
+- **Quota & Health**: Invoke `check_groq_quota` (or `./.venv/bin/whis-tube --check-quota`) to inspect per-key cooldowns, active sources, and binary readiness.
 
 ---
 

@@ -1,0 +1,7 @@
+{
+  "_instructions": "Paste your Groq API key(s) in the 'keys' list below (get free keys at https://console.groq.com/keys) and save. whis-tube hot-reloads this file automatically. Local edits are protected by git skip-worktree and a pre-commit secret guard so your real keys are NEVER pushed to GitHub.",
+  "keys": [
+    "gsk_PASTE_YOUR_GROQ_API_KEY_1_HERE",
+    "gsk_PASTE_YOUR_GROQ_API_KEY_2_HERE"
+  ]
+}

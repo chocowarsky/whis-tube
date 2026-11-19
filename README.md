@@ -12,98 +12,96 @@
 
 ---
 
-`whis-tube` is a Python-based Model Context Protocol (MCP) server engineered specifically for AI Coding Agents (Claude Code, Cursor, Windsurf, OpenBot, Hermes). It combines **lossless verbatim audio transcription via Groq Whisper Large V3** with **blazing-fast HD (720p/1080p) visual keyframe extraction** for ground-truth visual validation.
+`whis-tube` is a self-contained, zero-sudo Model Context Protocol (MCP) server and CLI engineered for AI Coding Agents (Antigravity, Claude Code, Cursor, Windsurf, Codex, OpenCode, Cline, Hermes). It combines **lossless verbatim audio transcription via Groq Whisper Large V3** with **blazing-fast HD (720p/1080p) visual keyframe extraction** for ground-truth visual validation.
 
 ---
 
 ## ✨ Key Features
 
+- **Zero-Sudo 1-Command Setup (`bootstrap.py`):** Uses only Python's standard library to download standalone static `uv`, `ffmpeg`, and `ffprobe` (with `libsoxr` & HLS support) into `./.bin/`, create `./.venv/` with `yt-dlp` and `mcp`, and register Antigravity MCP/plugin configs—no `sudo`, `apt`, or `brew` required.
+- **Drop-In Project Key Vault (`./keys.json`):** Open `keys.json` right inside the cloned folder, paste your Groq API key(s), and save. Changes hot-reload automatically without restarting, and keys are shielded via `chmod 600`, `git --skip-worktree`, and a `.git/hooks/pre-commit` secret guard so keys are never leaked to GitHub.
 - **True Verbatim Audio Ground-Truth (No Auto-Captions):** Fetches the original audio track (actively rejecting AI auto-dubbing), decodes once to FLAC 16 kHz mono using the SoX resampler and speech-clarity filter (`highpass`, `dynaudnorm`), and transcribes every spoken word with timestamp accuracy.
 - **Bilingual Indonesian-English Code-Switching:** Smart language detection, automated ticker and brand extraction (BTC, IHSG, BlackRock, TradingView), domain glossaries (crypto, finance, tech), deterministic phonetic collision normalization, and boilerplate hallucination filtering.
 - **Smart Silence-Detected Chunking (<25MB):** Automatically detects pauses and silence intervals to slice long audio (1–3+ hours) into ~10-minute segments. Requests strictly remain under Groq's 25 MB payload limit.
 - **Multi-Key Pool & 429 Failover:** Rotates across multiple Groq API keys seamlessly. When an HTTP 429 rate limit is encountered, the server reads the `retry-after` header, flags the key for cooldown, and transparently dispatches remaining chunks to another available key without failing the task.
 - **Rapid Visual Keyframe Extraction (HLS Range-Seek):** Extracts crisp native 720p/1080p frames in 4–7 seconds on exact timestamps without downloading the entire video file.
-- **Autonomous Cold-Start Channel Research (`SKILL.md`):** Complete operational blueprint for AI coding agents to research entire YouTube channels from scratch—automatically enumerating uploads and livestreams chronologically, organizing clean workspaces (`analysis/`, `raw-transcripts/`, `catalog_video.md`, `catalog_livestream.md`), extracting 1080p visual proof, and generating in-depth intelligence reports.
+- **Universal Agent Discovery & Direct CLI Fallback:** Ships with `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `SKILL.md` so any agent harness immediately knows how to set up and run every tool—either over MCP or directly via `./.venv/bin/whis-tube`.
 
 ---
 
-## 🛠️ System Requirements
+## ⚡ 2-Step Quickstart (Zero-Sudo)
 
-- **Python:** `>= 3.10`
-- **yt-dlp:** Available in system PATH (`yt-dlp --version`)
-- **ffmpeg & ffprobe:** Available in system PATH (`ffmpeg -version`)
-- **Groq API Key:** Free tier keys available at [console.groq.com](https://console.groq.com)
-
----
-
-## 🚀 Quickstart (One Command via `uv`)
-
-Run the MCP server directly without manual virtualenv management:
+### Step 1: Clone & Auto-Bootstrap (No `sudo`, No Prompts)
 
 ```bash
-# Run the MCP server directly
-uv run --directory . python -m whis_tube.server
+git clone https://github.com/chocowarsky/whis-tube.git
+cd whis-tube
+python3 bootstrap.py
 ```
 
-Or install locally in editable mode:
+This automatically installs standalone `uv`, `ffmpeg`, `ffprobe`, `.venv` (`yt-dlp`, `mcp`, `requests`, `python-dotenv`, `pydantic`), configures Antigravity (`~/.gemini/config`), and verifies readiness.
+
+### Step 2: Add Your Groq API Key(s)
+
+Open **`keys.json`** right in the `whis-tube` folder, paste one or more free Groq keys from [console.groq.com/keys](https://console.groq.com/keys), and save:
+
+```json
+{
+  "keys": [
+    "gsk_your_first_key_here",
+    "gsk_your_second_key_here"
+  ]
+}
+```
+
+Check readiness anytime:
 
 ```bash
-uv pip install -e .
-youtube-whisper
+python3 bootstrap.py --doctor
+./.venv/bin/whis-tube --check-quota
 ```
+
+> **Key Discovery Priority:** `./keys.json` (project root) → `./keys.local.json` → `<workspace>/keys.json` → `GROQ_KEYS_PATH` → `GROQ_API_KEY` (`.env` or env var) → `~/.config/groq/keys.json`. Placeholder templates are automatically ignored so they never shadow real keys.
 
 ---
 
-## 🔌 MCP Client Configuration
+## 🔌 MCP Client & CLI Usage
 
 ### 1. Google Antigravity (IDE, CLI `agy` & Desktop)
-`whis-tube` ships as a native Antigravity plugin (`plugin.json`, `mcp_config.json`, `skills/youtube-whisper/SKILL.md`, and `assets/logo.svg`). Install it globally once so it works across **Antigravity IDE**, **Antigravity CLI (`agy`)**, and **Antigravity Desktop**:
+Running `python3 bootstrap.py` automatically registers `youtube-whisper` in `~/.gemini/config/mcp_config.json` and installs the plugin bundle into `~/.gemini/config/plugins/whis-tube`.
+
+Or install directly with `agy`:
 
 ```bash
 agy plugin install /path/to/whis-tube
 agy plugin validate --strict ~/.gemini/config/plugins/whis-tube
 ```
 
-Or add the server entry directly to `~/.gemini/config/mcp_config.json` (useful if you only want the MCP tools without the plugin bundle).
-
-### 2. Claude Desktop / Claude Code / Cursor
-Add the server entry to your MCP configuration file (e.g., `claude_desktop_config.json` or `.mcp.json`):
+### 2. Claude Code / Cursor / Windsurf / Generic MCP Clients
+`.mcp.json` at the repo root auto-launches the self-healing server via `python3 bootstrap.py --serve`:
 
 ```json
 {
   "mcpServers": {
     "youtube-whisper": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        "/path/to/whis-tube",
-        "python",
-        "-m",
-        "whis_tube.server"
-      ],
-      "env": {
-        "GROQ_API_KEY": "gsk_your_key_here"
-      }
+      "command": "python3",
+      "args": ["bootstrap.py", "--serve"]
     }
   }
 }
 ```
 
-### 3. Multi-Key Pool (Recommended for Heavy Research)
-If you maintain multiple free-tier Groq API keys to maximize hourly/daily quotas, store them in `~/.config/groq/keys.json`:
+If pointing from an external workspace config, pass the full path to `bootstrap.py` (or `./.venv/bin/python -m whis_tube.server`).
 
-```json
-{
-  "keys": [
-    "gsk_key1...",
-    "gsk_key2...",
-    "gsk_key3..."
-  ]
-}
+### 3. Direct CLI Mode (Works Immediately Without MCP Reload)
+
+```bash
+./.venv/bin/whis-tube --check-quota
+./.venv/bin/whis-tube --info "https://www.youtube.com/watch?v=VIDEO_ID"
+./.venv/bin/whis-tube --list-channel "https://www.youtube.com/@handle/videos" --limit 30 --sort oldest_first
+./.venv/bin/whis-tube --keyframe "https://www.youtube.com/watch?v=VIDEO_ID" "00:15:30" --resolution 1080 --output frames/
+./.venv/bin/whis-tube --transcribe "https://www.youtube.com/watch?v=VIDEO_ID" --output transcripts/ --language id
 ```
-
-The `youtube-whisper` server automatically detects this pool file, manages round-robin rotation, and tracks key cooldown periods automatically.
 
 ---
 
@@ -115,7 +113,7 @@ The `youtube-whisper` server automatically detects this pool file, manages round
 | `extract_keyframe` | Extracts native HD frames (720p / 1080p) at exact timestamps (`HH:MM:SS`) in 4–7 seconds via HLS seek. | `url` (str), `timestamp` (str), `output_path` (str, optional), `resolution` (int, default 720) |
 | `get_video_info` | Retrieves concise metadata (title, channel, duration, live stream status). | `url` (str) |
 | `list_channel_videos` | Generates a chronological catalog of channel uploads (excluding Shorts), ordered oldest to newest. | `channel_url` (str), `limit` (int, default 30), `sort_order` (str, `oldest_first`/`newest_first`) |
-| `check_groq_quota` | Real-time health dashboard inspecting active Groq API keys, usage cooldowns, and pool readiness. | *(none)* |
+| `check_groq_quota` | Real-time health dashboard inspecting active Groq API keys, binary readiness, usage cooldowns, and pool status. | *(none)* |
 
 ---
 
@@ -123,13 +121,19 @@ The `youtube-whisper` server automatically detects this pool file, manages round
 
 ```text
 whis-tube/
+├── AGENTS.md                 # Universal AI agent bootstrap & tool instructions
+├── CLAUDE.md                 # Claude Code entrypoint instructions
+├── GEMINI.md                 # Gemini CLI / Antigravity entrypoint instructions
+├── bootstrap.py              # Zero-sudo stdlib installer, binary manager & --serve launcher
+├── keys.json                 # Local API key file (edit & save; protected by skip-worktree)
+├── keys.example.json         # Clean placeholder template for keys.json
 ├── plugin.json               # Antigravity plugin manifest
 ├── mcp_config.json           # Antigravity MCP server configuration
-├── .mcp.json                 # Claude Code / Cursor MCP configuration
-├── .env.example              # Environment variables template
+├── .mcp.json                 # Claude Code / Cursor self-healing MCP configuration
+├── .env.example              # Optional environment variables template
 ├── pyproject.toml            # Package configuration & dependencies
-├── SKILL.md                  # AI Agent Research Methodology & SOP (English)
-├── README.md                 # English Documentation
+├── SKILL.md                  # AI Agent Research Methodology & SOP
+├── README.md                 # Documentation
 ├── assets/
 │   └── logo.svg              # Plugin icon for Antigravity UI
 ├── skills/
@@ -137,14 +141,16 @@ whis-tube/
 │       └── SKILL.md          # Bundled Antigravity plugin skill
 └── src/
     └── whis_tube/
-        ├── __init__.py     # Package metadata
-        ├── __main__.py     # Module CLI entrypoint
-        ├── server.py       # FastMCP server & registered tool definitions
-        ├── audio.py        # yt-dlp, SoX FLAC encoding, clarity filter & chunking
-        ├── code_switch.py  # Bilingual Indonesian-English code-switching & phonetic rules
-        ├── groq_pool.py    # Multi-key Groq pool & automatic 429 failover
-        ├── visual.py       # HLS range-seek frame grabber
-        └── utils.py        # Timestamp formatting & channel parser
+        ├── __init__.py       # Package metadata
+        ├── __main__.py       # Module CLI entrypoint
+        ├── runtime.py        # Self-healing PATH, python -m yt_dlp & static ffmpeg guard
+        ├── config.py         # Configuration & local/global key path discovery
+        ├── server.py         # FastMCP server, tool definitions & direct CLI runner
+        ├── audio.py          # yt-dlp, SoX FLAC encoding, clarity filter & chunking
+        ├── code_switch.py    # Bilingual Indonesian-English code-switching & phonetic rules
+        ├── groq_pool.py      # Multi-key Groq pool, hot-reload & automatic 429 failover
+        ├── visual.py         # HLS range-seek frame grabber
+        └── utils.py          # Timestamp formatting & channel parser
 ```
 
 ---

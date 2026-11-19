@@ -6,10 +6,7 @@
         "--from",
         "git+https://github.com/chocowarsky/whis-tube",
         "whis-tube"
-      ],
-      "env": {
-        "GROQ_KEYS_PATH": "~/.config/groq/keys.json"
-      }
+      ]
     }
   }
 }
