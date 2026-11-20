@@ -19,6 +19,7 @@ from .config import (
     MODEL,
     REPO_ROOT,
     SCRATCH_DIR,
+    SCRATCH_RETENTION_DAYS,
     SEARCH_BACK_S,
     SEARCH_FWD_S,
     SILENCE_THRESHOLDS_DB,
@@ -30,7 +31,9 @@ from .code_switch import (
     build_whisper_prompt,
     extract_metadata_terms,
     is_hallucination_segment,
+    load_lexicon_config,
     normalize_code_switch_text,
+    resolve_active_presets,
     resolve_language,
 )
 from .groq_pool import (
@@ -138,63 +141,63 @@ def download_audio(url: str, info: Dict[str, Any]) -> Tuple[pathlib.Path, Dict[s
                 continue
             path = files[0]
 
-            try:
-                probe_res = run_command(
-                    [
-                        "ffprobe",
-                        "-v",
-                        "error",
-                        "-select_streams",
-                        "a:0",
-                        "-show_entries",
-                        "stream=codec_name,sample_rate,channels,bit_rate",
-                        "-of",
-                        "json",
-                        str(path),
-                    ],
-                    check=False,
-                )
-                if probe_res.returncode != 0 or not probe_res.stdout.strip():
-                    logger.warning(f"ffprobe failed for {path.name}: {probe_res.stderr}")
-                    continue
-                probe = json.loads(probe_res.stdout)
-            except Exception as probe_err:
-                logger.warning(f"Failed to probe audio file {path.name}: {probe_err}")
+        try:
+            probe_res = run_command(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "a:0",
+                    "-show_entries",
+                    "stream=codec_name,sample_rate,channels,bit_rate",
+                    "-of",
+                    "json",
+                    str(path),
+                ],
+                check=False,
+            )
+            if probe_res.returncode != 0 or not probe_res.stdout.strip():
+                logger.warning(f"ffprobe failed for {path.name}: {probe_res.stderr}")
                 continue
+            probe = json.loads(probe_res.stdout)
+        except Exception as probe_err:
+            logger.warning(f"Failed to probe audio file {path.name}: {probe_err}")
+            continue
 
-            st = (probe.get("streams") or [{}])[0]
-            chosen = bool(fmt) and fsel == str(fmt.get("format_id") if fmt else "")
+        st = (probe.get("streams") or [{}])[0]
+        chosen = bool(fmt) and fsel == str(fmt.get("format_id") if fmt else "")
 
-            def _safe_int(val: Any) -> int:
-                if val is None:
-                    return 0
-                s = str(val).strip()
-                if s.isdigit():
-                    return int(s)
-                try:
-                    return int(float(s))
-                except (ValueError, TypeError):
-                    return 0
+        def _safe_int(val: Any) -> int:
+            if val is None:
+                return 0
+            s = str(val).strip()
+            if s.isdigit():
+                return int(s)
+            try:
+                return int(float(s))
+            except (ValueError, TypeError):
+                return 0
 
-            raw_sr = _safe_int(st.get("sample_rate"))
-            raw_br = _safe_int(st.get("bit_rate"))
-            abr_val = (fmt.get("abr") if (chosen and fmt) else 0) or 0
-            bitrate_kbps = round(float(abr_val) if abr_val else (raw_br / 1000.0), 1)
+        raw_sr = _safe_int(st.get("sample_rate"))
+        raw_br = _safe_int(st.get("bit_rate"))
+        abr_val = (fmt.get("abr") if (chosen and fmt) else 0) or 0
+        bitrate_kbps = round(float(abr_val) if abr_val else (raw_br / 1000.0), 1)
 
-            meta = {
-                "format_selector": fsel,
-                "format_id": fmt.get("format_id") if (chosen and fmt) else fsel,
-                "format_note": fmt.get("format_note") if (chosen and fmt) else None,
-                "codec": st.get("codec_name"),
-                "sample_rate": raw_sr,
-                "channels": st.get("channels"),
-                "bitrate_kbps": bitrate_kbps,
-                "degraded_fallback": degraded,
-                "file": path.name,
-            }
-            if degraded:
-                logger.warning("Using degraded progressive fallback audio.")
-            return path, meta
+        meta = {
+            "format_selector": fsel,
+            "format_id": fmt.get("format_id") if (chosen and fmt) else fsel,
+            "format_note": fmt.get("format_note") if (chosen and fmt) else None,
+            "codec": st.get("codec_name"),
+            "sample_rate": raw_sr,
+            "channels": st.get("channels"),
+            "bitrate_kbps": bitrate_kbps,
+            "degraded_fallback": degraded,
+            "file": path.name,
+        }
+        if degraded:
+            logger.warning("Using degraded progressive fallback audio.")
+        return path, meta
 
     raise RuntimeError(f"All audio download attempts failed for {vid}")
 
@@ -417,11 +420,41 @@ def save_chunk_ckpt(vid: str, idx: int, segs: List[Dict[str, Any]], words: List[
     _atomic_json(CKPT_ROOT / vid / f"chunk{idx:03d}.json", {"segments": segs, "words": words})
 
 
+def prune_scratch_cache(retention_days: int = SCRATCH_RETENTION_DAYS) -> int:
+    """Remove stale scratch audio files and abandoned checkpoints older than retention_days."""
+    if retention_days < 0:
+        return 0
+    cutoff = time.time() - (retention_days * 86400)
+    removed = 0
+
+    for item in SCRATCH_DIR.glob("yt_*"):
+        try:
+            if item.is_file() and item.stat().st_mtime < cutoff:
+                item.unlink(missing_ok=True)
+                removed += 1
+        except OSError as exc:
+            logger.debug(f"Failed to prune scratch file {item.name}: {exc}")
+
+    if CKPT_ROOT.is_dir():
+        for ckpt_dir in CKPT_ROOT.iterdir():
+            try:
+                if ckpt_dir.is_dir() and ckpt_dir.stat().st_mtime < cutoff:
+                    shutil.rmtree(ckpt_dir, ignore_errors=True)
+                    removed += 1
+            except OSError as exc:
+                logger.debug(f"Failed to prune checkpoint dir {ckpt_dir.name}: {exc}")
+
+    if removed:
+        logger.info(f"Pruned {removed} stale scratch item(s) older than {retention_days} day(s).")
+    return removed
+
+
 def transcribe_video(
     url: str,
     output_path: str = "",
     language: Optional[str] = None,
     glossary: str = "",
+    preset: str = "auto",
 ) -> Dict[str, Any]:
     """Run full verbatim audio transcription pipeline with multi-key Groq Whisper Large V3."""
     ensure_runtime_binaries()
@@ -467,8 +500,26 @@ def transcribe_video(
     bounds, reused = load_or_make_plan(vid, flac, real_dur)
 
     lang = resolve_language(language, info, audio_meta)
-    terms = extract_metadata_terms(info, custom_glossary=glossary, max_terms=40)
-    base_prompt = build_whisper_prompt(title, channel, lang, terms, prev_segments=None, include_tail=False)
+    lexicon_cfg = load_lexicon_config()
+    active_presets = resolve_active_presets(info, preset=preset, lexicon_cfg=lexicon_cfg)
+    terms = extract_metadata_terms(
+        info,
+        custom_glossary=glossary,
+        max_terms=40,
+        preset=preset,
+        active_presets=active_presets,
+        lexicon_cfg=lexicon_cfg,
+    )
+    base_prompt = build_whisper_prompt(
+        title,
+        channel,
+        lang,
+        terms,
+        prev_segments=None,
+        include_tail=False,
+        active_presets=active_presets,
+        lexicon_cfg=lexicon_cfg,
+    )
 
     segments: List[Dict[str, Any]] = []
     words: List[Dict[str, Any]] = []
@@ -492,6 +543,8 @@ def transcribe_video(
                         prev_segments=segments,
                         include_tail=True,
                         max_chars=600,
+                        active_presets=active_presets,
+                        lexicon_cfg=lexicon_cfg,
                     )
                     segs, wds = transcribe_chunk(pool, chunk, start, lang, prompt, base_prompt=base_prompt)
                     save_chunk_ckpt(vid, idx, segs, wds)
@@ -520,22 +573,31 @@ def transcribe_video(
     ):
         segments.pop()
 
-    # Apply deterministic phonetic normalization for Indonesian-English code-switching
+    # Apply deterministic phonetic normalization for bilingual code-switching
     phonetic_corrections_count = 0
     for s in segments:
         orig_text = s.get("text", "")
-        norm_text = normalize_code_switch_text(orig_text)
+        norm_text = normalize_code_switch_text(
+            orig_text,
+            active_presets=active_presets,
+            lexicon_cfg=lexicon_cfg,
+        )
         if norm_text != orig_text:
             phonetic_corrections_count += 1
             s["text"] = norm_text
 
     for w in words:
         orig_word = w.get("word", "")
-        norm_word = normalize_code_switch_text(orig_word)
+        norm_word = normalize_code_switch_text(
+            orig_word,
+            active_presets=active_presets,
+            lexicon_cfg=lexicon_cfg,
+        )
         if norm_word != orig_word:
             w["word"] = norm_word
 
     flagged = [s for s in segments if s.get("flags")]
+    preset_summary = ", ".join(active_presets) if active_presets else "neutral"
 
     # Build verbatim Markdown
     a = audio_meta
@@ -546,7 +608,7 @@ def transcribe_video(
         f"- **URL:** https://www.youtube.com/watch?v={vid}",
         f"- **Duration:** {fmt_ts(duration)} ({duration}s)",
         f"- **Transcription Engine:** Groq {MODEL} (verbatim, temperature 0, language: {lang or 'auto'})",
-        f"- **Bilingual Code-Switching:** {'Enabled' if lang == 'id' else 'Off'} (glossary terms: {len(terms)}, phonetic corrections: {phonetic_corrections_count})",
+        f"- **Bilingual Code-Switching:** {'Enabled' if lang == 'id' else 'Off'} (presets: {preset_summary}, glossary terms: {len(terms)}, phonetic corrections: {phonetic_corrections_count})",
         f"- **Audio Source:** format {a['format_id']} | {a['codec']} {a['bitrate_kbps']} kbps {a['sample_rate']} Hz | {a['format_note'] or '-'}"
         + (" | DEGRADED FALLBACK" if a["degraded_fallback"] else ""),
         f"- **Preprocessing:** Lossless FLAC 16 kHz mono (clarity filter & SoX resampler), {len(bounds)} silence-aligned chunk(s)",
@@ -597,6 +659,7 @@ def transcribe_video(
                     "resumed_chunks": resumed,
                     "code_switch": {
                         "resolved_language": lang,
+                        "active_presets": active_presets,
                         "glossary_terms_count": len(terms),
                         "phonetic_corrections_count": phonetic_corrections_count,
                         "terms": terms,
@@ -615,8 +678,9 @@ def transcribe_video(
         encoding="utf-8",
     )
 
-    # Clean up checkpoint folder upon full success
+    # Clean up checkpoint folder and stale scratch cache upon full success
     shutil.rmtree(CKPT_ROOT / vid, ignore_errors=True)
+    prune_scratch_cache()
 
     elapsed = round(time.time() - t0, 1)
     word_count = sum(len(s["text"].split()) for s in segments)
@@ -631,6 +695,7 @@ def transcribe_video(
         "total_segments": len(segments),
         "total_words": word_count,
         "low_confidence_segments": len(flagged),
+        "active_presets": active_presets,
         "glossary_terms_count": len(terms),
         "phonetic_corrections_count": phonetic_corrections_count,
         "transcript_path": str(out_file.resolve()),

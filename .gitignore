@@ -40,5 +40,9 @@ transcripts/
 *.key
 keys.local.json
 
+# Local custom code-switching presets & lexicons
+lexicon.json
+lexicon.local.json
+
 # Local self-contained binaries
 .bin/

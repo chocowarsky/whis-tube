@@ -1,0 +1,43 @@
+{
+  "default_preset": "auto",
+  "enabled_presets": [
+    "tech",
+    "finance",
+    "crypto",
+    "medical",
+    "gaming",
+    "business"
+  ],
+  "default_style_seed_id": "Pembahasan mendalam mengenai framework, workflow, best practice, case study, benchmark, update fitur, serta analisis data dan insight utama.",
+  "custom_glossary": [
+    "Antigravity",
+    "FastMCP"
+  ],
+  "phonetic_rules": {
+    "antrofic": "Anthropic",
+    "antropik": "Anthropic"
+  },
+  "presets": {
+    "podcast": {
+      "triggers": [
+        "podcast",
+        "interview",
+        "wawancara",
+        "obrolan",
+        "storytelling"
+      ],
+      "style_seed": "Obrolan podcast santai membahas mind-set, journey, storytelling, insight, dan behind the scenes.",
+      "glossary": [
+        "mindset",
+        "storytelling",
+        "insight",
+        "founder",
+        "creator"
+      ],
+      "phonetic_rules": {
+        "podkes": "podcast",
+        "mainset": "mindset"
+      }
+    }
+  }
+}

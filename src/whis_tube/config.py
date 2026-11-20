@@ -61,6 +61,7 @@ SEARCH_BACK_S = int(os.environ.get("SEARCH_BACK_S", "90"))       # Look back 90s
 SEARCH_FWD_S = int(os.environ.get("SEARCH_FWD_S", "30"))         # Look fwd 30s for pause
 MAX_UPLOAD_BYTES = 24 * 1024 * 1024                              # 24 MB safe threshold (<25MB limit)
 QUOTA_MAX_WAIT_S = int(os.environ.get("GROQ_MAX_WAIT_S", "900")) # In-process wait limit
+SCRATCH_RETENTION_DAYS = int(os.environ.get("WHIS_TUBE_CACHE_DAYS", "3"))
 SILENCE_THRESHOLDS_DB = (-40, -35, -30, -25, -20)                # Silencedetect thresholds (strictest first)
 
 # yt-dlp base arguments (prefers python -m yt_dlp in active venv)

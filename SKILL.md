@@ -28,7 +28,7 @@ Standardized, autonomous end-to-end research pipeline for YouTube channels and l
 
 | Tool | Function | Key Arguments |
 | :--- | :--- | :--- |
-| `transcribe_youtube` | Full verbatim audio transcription with silence-detected smart chunking (<25MB) and bilingual code-switching | `url`, `output_path`, `language`, `glossary` |
+| `transcribe_youtube` | Full verbatim audio transcription with silence-detected smart chunking (<25MB) and universal code-switching | `url`, `output_path`, `language`, `glossary`, `preset` |
 | `extract_keyframe` | Ultra-fast native HD frame extraction (720p/1080p) via HLS seek in 4–7 seconds | `url`, `timestamp` (HH:MM:SS), `output_path`, `resolution` |
 | `get_video_info` | Fast video metadata (title, channel, duration, live stream status) | `url` |
 | `list_channel_videos` | Chronological video/livestream catalog (excluding Shorts <60s) from oldest to newest | `channel_url`, `limit`, `sort_order` |
@@ -134,12 +134,12 @@ When the user shares a specific YouTube video link from a new creator or channel
 ---
 
 ### Phase 3: Verbatim Audio Transcription & Bilingual Code-Switching
-- Call `transcribe_youtube(url="https://www.youtube.com/watch?v=<id>", output_path=".../raw-transcripts/<type>/<id>_<sanitized_title>.md", glossary="...")`.
+- Call `transcribe_youtube(url="https://www.youtube.com/watch?v=<id>", output_path=".../raw-transcripts/<type>/<id>_<sanitized_title>.md", glossary="...", preset="auto")`.
 - The pipeline isolates the original audio track (rejecting AI auto-dubbing), applies a speech-clarity filter (`highpass=f=80,dynaudnorm=f=150:g=15:p=0.95`), and decodes to 16 kHz mono FLAC via SoX resampling.
 - Automatically resolves Indonesian content from metadata even when YouTube mislabels the audio language as English.
-- Extracts financial tickers (BTC, IHSG, FOMC), CamelCase brands (BlackRock, TradingView, Pump.fun), and domain keywords to prime Whisper Large V3 with style seeds and token-budgeted prompts (<600 chars).
-- Applies deterministic phonetic normalizations (e.g., `"busai"` → `"Bursa Efek"`, `"PAMFAN"` → `"Pump.fun"`, `"Starling"` → `"Starlink"`) and filters silence/boilerplate hallucinations.
-- Supports custom user lexicons via optional `~/.config/whis-tube/lexicon.json` or tool parameter `glossary="term1, term2"`.
+- Uses a neutral bilingual seed by default and auto-activates domain presets (`tech`, `finance`, `crypto`, `medical`, `gaming`, `business`, or custom presets in `lexicon.json`) based on metadata triggers or explicit `preset="..."` (`"auto"`, `"none"`, or comma-separated names), plus extracted tickers, CamelCase brands, and proper nouns (<600 chars prompt budget).
+- Applies deterministic phonetic normalizations from universal, active preset, and user custom rules while filtering silence/boilerplate hallucinations.
+- Supports hot-reloaded custom lexicons & domain presets via `./lexicon.json`, `WHIS_TUBE_LEXICON_PATH`, or `~/.config/whis-tube/lexicon.json` (see `lexicon.example.json`), plus per-call `glossary="term1, term2"` and `preset="..."`.
 - **Mandatory Full Read**: Always read the full `.md` transcript file before writing any analysis—never synthesize from memory or partial snippets.
 - **Surgical HLS Slice Repair for Countdown Language-Drift**: If a long livestream drifts into wrong-language translation during opening countdown music, extract only the affected time window as FLAC via HLS seek, re-transcribe with pinned `language`, and splice back into the `.md` and `_raw.json` files.
 

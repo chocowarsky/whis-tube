@@ -59,6 +59,7 @@ async def transcribe_youtube(
     output_path: str = "",
     language: str = "",
     glossary: str = "",
+    preset: str = "auto",
 ) -> str:
     """Download audio, apply silence-detected chunking (<25MB), and transcribe verbatim
     via Groq Whisper Large V3 with timestamped segment accuracy and bilingual code-switching.
@@ -71,6 +72,9 @@ async def transcribe_youtube(
                   with Indonesian code-switching detection.
         glossary: Optional comma-separated custom domain keywords or glossary terms
                   (e.g. 'Sui, Aptos, Arbitrum, LayerZero').
+        preset: Domain preset(s) for code-switching ('auto', 'none', or comma-separated names
+                such as 'tech', 'finance', 'crypto', 'medical', 'gaming', 'business', or custom
+                presets defined in lexicon.json). Defaults to 'auto'.
     """
     logger.info(f"Received transcribe request: {url}")
     try:
@@ -78,8 +82,16 @@ async def transcribe_youtube(
         loop = asyncio.get_running_loop()
         res = await loop.run_in_executor(
             None,
-            lambda: _transcribe_video(url, output_path=output_path, language=language or None, glossary=glossary),
+            lambda: _transcribe_video(
+                url,
+                output_path=output_path,
+                language=language or None,
+                glossary=glossary,
+                preset=preset,
+            ),
         )
+        active_presets = res.get("active_presets") or []
+        preset_str = ", ".join(active_presets) if active_presets else "neutral"
         glossary_info = f"- **Glossary Terms:** {res.get('glossary_terms_count', 0)}\n" if res.get('glossary_terms_count') else ""
         phonetic_info = f"- **Phonetic Corrections:** {res.get('phonetic_corrections_count', 0)}\n" if res.get('phonetic_corrections_count') else ""
         return (
@@ -88,6 +100,7 @@ async def transcribe_youtube(
             f"- **Channel:** {res['channel']}\n"
             f"- **Duration:** {res['duration']}\n"
             f"- **Language:** {res.get('language') or 'auto'}\n"
+            f"- **Active Presets:** {preset_str}\n"
             f"- **Total Segments:** {res['total_segments']} ({res['total_words']:,} words)\n"
             f"- **Low-Confidence Segments:** {res['low_confidence_segments']}\n"
             f"{glossary_info}"
@@ -326,6 +339,11 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", default="", help="Output file or directory for --transcribe / --keyframe.")
     parser.add_argument("--language", default="", help="Language code override for --transcribe (e.g. id, en).")
     parser.add_argument("--glossary", default="", help="Comma-separated glossary terms for --transcribe.")
+    parser.add_argument(
+        "--preset",
+        default="auto",
+        help="Domain preset(s) for code-switching ('auto', 'none', or comma-separated names like 'tech,finance').",
+    )
     return parser
 
 
@@ -361,6 +379,7 @@ def main():
                 output_path=args.output,
                 language=args.language,
                 glossary=args.glossary,
+                preset=args.preset,
             )
         )
     else:
