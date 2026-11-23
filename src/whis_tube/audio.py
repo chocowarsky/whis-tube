@@ -800,11 +800,12 @@ def transcribe_video(
             for s in flagged:
                 lines.append(f"- [{fmt_ts(s['start'])}] {', '.join(s['flags'])}: {s['text'][:140]}")
 
-        out_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with open(out_file, "w", encoding="utf-8") as md_fh:
+            md_fh.write("\n".join(lines) + "\n")
 
         # Build raw metadata JSON
-        raw_file.write_text(
-            json.dumps(
+        with open(raw_file, "w", encoding="utf-8") as raw_fh:
+            json.dump(
                 {
                     "info": {
                         "id": vid,
@@ -835,11 +836,10 @@ def transcribe_video(
                     "segments": segments,
                     "words": words,
                 },
+                raw_fh,
                 indent=2,
                 ensure_ascii=False,
-            ),
-            encoding="utf-8",
-        )
+            )
 
         # Clean up checkpoint folder and stale scratch cache upon full success
         shutil.rmtree(_ckpt_dir(vid), ignore_errors=True)
