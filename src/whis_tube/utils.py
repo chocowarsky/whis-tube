@@ -60,7 +60,7 @@ def parse_ts(ts: str) -> float:
 def sanitize_filename(name: str, max_len: int = 80) -> str:
     """Sanitize string for safe filenames across Linux, macOS, and Windows."""
     clean = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", str(name or ""))
-    clean = re.sub(r'[\\/*?:"<>|.]', "", clean)
+    clean = re.sub(r'[\\/*?:"<>|().]', "", clean)
     clean = re.sub(r"\s+", "_", clean).strip("_")
     res = clean[:max_len]
     if res.upper() in {
@@ -70,6 +70,39 @@ def sanitize_filename(name: str, max_len: int = 80) -> str:
     }:
         res = f"{res}_file"
     return res or "video"
+
+
+def slugify_channel(name: str, max_len: int = 60) -> str:
+    """Convert a YouTube channel title into a clean kebab-case directory slug."""
+    raw = str(name or "").strip().lower()
+    raw = re.sub(r"^@+", "", raw)
+    slug = re.sub(r"[^a-z0-9]+", "-", raw).strip("-")
+    return (slug[:max_len].strip("-")) or "youtube-channel"
+
+
+def classify_asset_type(live_status: Optional[str]) -> str:
+    """Classify a YouTube item as 'livestreams' or 'videos' from yt-dlp live_status."""
+    status = str(live_status or "").strip().lower()
+    if status in {"was_live", "is_live", "post_live"}:
+        return "livestreams"
+    return "videos"
+
+
+def format_catalog_duration(seconds: float) -> str:
+    """Format duration in human-readable catalog form ('1h 54m 46s' or '15m 20s')."""
+    try:
+        val = float(seconds)
+        if not math.isfinite(val) or val < 0:
+            return "0m 00s"
+        total = int(val)
+    except (ValueError, TypeError):
+        return "0m 00s"
+    h = total // 3600
+    m = (total % 3600) // 60
+    s = total % 60
+    if h > 0:
+        return f"{h}h {m:02d}m {s:02d}s"
+    return f"{m}m {s:02d}s"
 
 
 def run_command(

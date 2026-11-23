@@ -24,7 +24,9 @@
 - **Universal Domain Presets & Hot-Reloaded Custom Lexicon (`lexicon.json`):** Neutral bilingual default for general content (zero forced finance bias), auto-detection across 6 built-in presets (`tech`, `finance`, `crypto`, `medical`, `gaming`, `business`), explicit override via `preset` / `--preset` (`auto`, `none`, or custom preset names), automated ticker/brand extraction, and drop-in customization via `lexicon.json` (copy `lexicon.example.json` → `lexicon.json` in project root or `~/.config/whis-tube/lexicon.json`).
 - **Smart Silence-Detected Chunking (<25MB):** Automatically detects pauses and silence intervals to slice long audio (1–3+ hours) into ~10-minute segments. Requests strictly remain under Groq's 25 MB payload limit.
 - **Multi-Key Pool & 429 Failover:** Rotates across multiple Groq API keys seamlessly. When an HTTP 429 rate limit is encountered, the server reads the `retry-after` header, flags the key for cooldown, and transparently dispatches remaining chunks to another available key without failing the task.
-- **Rapid Visual Keyframe Extraction (HLS Range-Seek):** Extracts crisp native 720p/1080p frames in 4–7 seconds on exact timestamps without downloading the entire video file.
+- **Rapid Visual Keyframe Extraction (Native 1080p HLS Range-Seek):** Extracts crisp native 1080p (default) or 720p frames in 4–7 seconds on exact timestamps without downloading full video files, returning SOP-ready relative `frames/<video_id>_<HHMMSS>.jpg` embed snippets.
+- **Deterministic Workspace Scaffolder & Compliance Auditor (`audit.py`):** Exposes `scaffold_channel_workspace` (strict CRLF `\r\n` master catalogs & directory layout) and `audit_research_report` (machine-verified depth floors, chronological coverage, zero `$`/LaTeX, 1:1 `1920x1080` frame parity, and transcript completeness) so even lightweight models (`Hydrogen`, `Flash`) deliver frontier-grade quality on multi-hour runs.
+- **Timeout-Safe Long-Run Execution & Prompt-Echo Filtering:** Includes PID-aware per-video locking, chunk checkpoint resume, and punctuation-insensitive repetition/prompt-echo detection so multi-hour livestreams transcribe cleanly without duplicate quota burn or silence hallucinations.
 - **Universal Agent Discovery & Direct CLI Fallback:** Ships with `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `SKILL.md` so any agent harness immediately knows how to set up and run every tool—either over MCP or directly via `./.venv/bin/whis-tube`.
 
 ---
@@ -93,15 +95,17 @@ agy plugin validate --strict ~/.gemini/config/plugins/whis-tube
 
 If pointing from an external workspace config, pass the full path to `bootstrap.py` (or `./.venv/bin/python -m whis_tube.server`).
 
-### 3. Direct CLI Mode (Works Immediately Without MCP Reload)
+### 3. Direct CLI Mode (Works Immediately & Timeout-Safe for `>= 45m` Livestreams)
 
 ```bash
 ./.venv/bin/whis-tube --check-quota
 ./.venv/bin/whis-tube --info "https://www.youtube.com/watch?v=VIDEO_ID"
 ./.venv/bin/whis-tube --list-channel "https://www.youtube.com/@handle/videos" --limit 30 --sort oldest_first
+./.venv/bin/whis-tube --scaffold --workspace-root youtube-research --channel-name "Channel Name" --channel-url "https://www.youtube.com/@handle" --video-id VIDEO_ID --title "Video Title" --duration 3600 --asset-type livestreams
 ./.venv/bin/whis-tube --keyframe "https://www.youtube.com/watch?v=VIDEO_ID" "00:15:30" --resolution 1080 --output frames/
 ./.venv/bin/whis-tube --transcribe "https://www.youtube.com/watch?v=VIDEO_ID" --output transcripts/ --language id --preset auto
 ./.venv/bin/whis-tube --transcribe "https://www.youtube.com/watch?v=VIDEO_ID" --preset tech --glossary "FastMCP, Docker, Kubernetes"
+./.venv/bin/whis-tube --audit-report "youtube-research/<slug>/analysis/livestreams/<report>.md"
 ```
 
 ### 4. Customizing Presets & Lexicons (`lexicon.json`)
@@ -119,9 +123,11 @@ Copy `lexicon.example.json` to `./lexicon.json` (project root) or `~/.config/whi
 
 | Tool Name | Description | Arguments |
 | :--- | :--- | :--- |
-| `transcribe_youtube` | Downloads original audio, chunks at silence (<25MB), and transcribes verbatim into timestamped `.md` and structured `_raw.json` with universal code-switching & domain presets. | `url` (str), `output_path` (str, optional), `language` (str, optional), `glossary` (str, optional), `preset` (str, default `"auto"`) |
-| `extract_keyframe` | Extracts native HD frames (720p / 1080p) at exact timestamps (`HH:MM:SS`) in 4–7 seconds via HLS seek. | `url` (str), `timestamp` (str), `output_path` (str, optional), `resolution` (int, default 720) |
-| `get_video_info` | Retrieves concise metadata (title, channel, duration, live stream status). | `url` (str) |
+| `transcribe_youtube` | Downloads original audio, chunks at silence (<25MB), and transcribes verbatim into timestamped `.md` and structured `_raw.json` with universal code-switching, prompt-echo flagging & PID lock. | `url` (str), `output_path` (str, optional), `language` (str, optional), `glossary` (str, optional), `preset` (str, default `"auto"`) |
+| `extract_keyframe` | Extracts native Full HD (`1080p` default) or `720p` frames at exact timestamps (`HH:MM:SS`) in 4–7 seconds via HLS seek and returns relative `frames/` embed snippets. | `url` (str), `timestamp` (str), `output_path` (str, optional), `resolution` (int, default `1080`) |
+| `get_video_info` | Retrieves video metadata plus deterministic channel slug, `@handle`, asset type (`videos`/`livestreams`), sanitized title, recommended paths, and long-run timeout hint. | `url` (str) |
+| `scaffold_channel_workspace` | Creates/updates standardized `youtube-research/<slug>/` folders and strict Windows CRLF (`\r\n`) master catalogs with accurate Done/Pending counters. | `workspace_root`, `channel_name`, `channel_url`, `channel_slug`, `video_id`, `title`, `duration`, `asset_type`, `status` |
+| `audit_research_report` | Deterministic PASS/FAIL quality gate checking 5 required sections, proportional depth & timestamp span, zero `$`/LaTeX, zero foreign paths, 1:1 `1920x1080` frames, transcript parity & CRLF catalogs. | `report_path`, `transcript_path`, `catalog_path`, `min_frames`, `min_words`, `require_1080p` |
 | `list_channel_videos` | Generates a chronological catalog of channel uploads (excluding Shorts), ordered oldest to newest. | `channel_url` (str), `limit` (int, default 30), `sort_order` (str, `oldest_first`/`newest_first`) |
 | `check_groq_quota` | Real-time health dashboard inspecting active Groq API keys, binary readiness, usage cooldowns, and pool status. | *(none)* |
 
@@ -157,11 +163,12 @@ whis-tube/
         ├── runtime.py        # Self-healing PATH, python -m yt_dlp & static ffmpeg guard
         ├── config.py         # Configuration & local/global key path discovery
         ├── server.py         # FastMCP server, tool definitions & direct CLI runner
-        ├── audio.py          # yt-dlp, SoX FLAC encoding, clarity filter & chunking
-        ├── code_switch.py    # Bilingual Indonesian-English code-switching & phonetic rules
+        ├── audio.py          # yt-dlp, SoX FLAC encoding, clarity filter, chunking & PID lock
+        ├── audit.py          # Deterministic CRLF workspace scaffolder & report compliance auditor
+        ├── code_switch.py    # Bilingual Indonesian-English code-switching, phonetic & echo guards
         ├── groq_pool.py      # Multi-key Groq pool, hot-reload & automatic 429 failover
-        ├── visual.py         # HLS range-seek frame grabber
-        └── utils.py          # Timestamp formatting & channel parser
+        ├── visual.py         # Native 1080p HLS range-seek frame grabber
+        └── utils.py          # Timestamp formatting, slugifier & channel parser
 ```
 
 ---

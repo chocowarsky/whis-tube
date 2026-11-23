@@ -14,13 +14,22 @@ from .utils import fmt_ts, parse_ts, run_command, sanitize_filename
 logger = logging.getLogger("whis-tube.visual")
 
 
+def format_markdown_embed(target_file: pathlib.Path, ts_formatted: str) -> str:
+    """Build SOP-compliant relative Markdown embed snippet for an extracted keyframe."""
+    if target_file.parent.name == "frames":
+        rel_ref = f"frames/{target_file.name}"
+    else:
+        rel_ref = target_file.name
+    return f"![Visual Evidence: {ts_formatted}]({rel_ref})\n*Timestamp: {ts_formatted}*"
+
+
 def extract_keyframe(
     url: str,
     timestamp: str,
     output_path: str = "",
-    resolution: int = 720,
+    resolution: int = 1080,
 ) -> Dict[str, Any]:
-    """Extract a native 720p or 1080p HD keyframe at an exact timecode in seconds.
+    """Extract a native 1080p (or 720p) HD keyframe at an exact timecode in seconds.
 
     Uses direct HLS m3u8 playlist range-seek with ffmpeg for fast extraction (4–7s)
     without downloading full video files or triggering CDN throttling.
@@ -30,7 +39,7 @@ def extract_keyframe(
         timestamp: Timecode string ('HH:MM:SS', 'MM:SS', or seconds).
         output_path: Optional destination image path (.jpg). If directory or empty,
                      automatically generated as '<video_id>_<HHMMSS>.jpg'.
-        resolution: Height in pixels (720 or 1080). Defaults to 720.
+        resolution: Height in pixels (1080 or 720). Defaults to 1080.
 
     Returns:
         Dict with image_path, timestamp, resolution, and markdown_embed string.
@@ -44,9 +53,9 @@ def extract_keyframe(
     try:
         res_int = int(resolution)
     except (ValueError, TypeError):
-        res_int = 720
+        res_int = 1080
     if res_int <= 0:
-        res_int = 720
+        res_int = 1080
     elif res_int > 4320:
         res_int = 4320
     resolution = res_int
@@ -220,5 +229,5 @@ def extract_keyframe(
         "seconds": ts_seconds,
         "dimensions": dim_str,
         "image_path": str(target_file.resolve()),
-        "markdown_embed": f"![Visual Frame: {ts_formatted}]({target_file.as_posix()})\n*Screenshot: [{ts_formatted}]*",
+        "markdown_embed": format_markdown_embed(target_file, ts_formatted),
     }

@@ -41,21 +41,25 @@ python3 bootstrap.py --doctor
 ### Option A: MCP Tools (`youtube-whisper`)
 Start over stdio with `python3 bootstrap.py --serve` or `./.venv/bin/python -m whis_tube.server`.
 Available MCP tools:
-- `transcribe_youtube(url, output_path="", language="", glossary="")`
-- `extract_keyframe(url, timestamp, output_path="", resolution=720)`
-- `get_video_info(url)`
+- `transcribe_youtube(url, output_path="", language="", glossary="", preset="auto")`
+- `extract_keyframe(url, timestamp, output_path="", resolution=1080)`
+- `get_video_info(url)` (includes channel handle/slug, asset type, sanitized title, and long-run timeout hint)
 - `list_channel_videos(channel_url, limit=30, sort_order="oldest_first")`
 - `check_groq_quota()`
+- `scaffold_channel_workspace(workspace_root, channel_name, channel_url="", channel_slug="", video_id="", title="", duration="", asset_type="videos", status="⏳ In Progress")`
+- `audit_research_report(report_path, transcript_path="", catalog_path="", min_frames=0, min_words=0, require_1080p=True)`
 
-### Option B: Direct CLI (Immediate Fallback Without Waiting for MCP Reload)
-Every tool works directly via `./.venv/bin/whis-tube`:
+### Option B: Direct CLI (Immediate Fallback & Timeout-Safe Mode for `>= 45m` Livestreams)
+Every tool works directly via `./.venv/bin/whis-tube`. For videos/livestreams `>= 45 min`, prefer CLI `--transcribe` to avoid 3-minute MCP client timeouts:
 
 ```bash
 ./.venv/bin/whis-tube --check-quota
 ./.venv/bin/whis-tube --info "https://www.youtube.com/watch?v=VIDEO_ID"
 ./.venv/bin/whis-tube --list-channel "https://www.youtube.com/@handle/videos" --limit 30 --sort oldest_first
+./.venv/bin/whis-tube --scaffold --workspace-root youtube-research --channel-name "Channel Name" --channel-url "https://www.youtube.com/@handle" --video-id VIDEO_ID --title "Video Title" --duration 3600 --asset-type livestreams
 ./.venv/bin/whis-tube --keyframe "https://www.youtube.com/watch?v=VIDEO_ID" "00:15:30" --resolution 1080 --output frames/
-./.venv/bin/whis-tube --transcribe "https://www.youtube.com/watch?v=VIDEO_ID" --output transcripts/ --language id
+./.venv/bin/whis-tube --transcribe "https://www.youtube.com/watch?v=VIDEO_ID" --output transcripts/ --preset auto
+./.venv/bin/whis-tube --audit-report "youtube-research/<slug>/analysis/videos/<report>.md"
 ```
 
 ## 4. Channel Research SOP

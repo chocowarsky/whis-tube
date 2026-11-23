@@ -271,17 +271,20 @@ STOP_WORDS: Set[str] = {
 
 # Known silence / boilerplate hallucination regexes
 HALLUCINATION_PATTERNS: List[re.Pattern] = [
-    re.compile(r"^terima kasih (telah|sudah) menonton[\.!\s]*$", re.IGNORECASE),
-    re.compile(r"^thanks? (you )?for watching[\.!\s]*$", re.IGNORECASE),
-    re.compile(r"^subtitles by (the )?amara\.org community[\.!\s]*$", re.IGNORECASE),
+    re.compile(r"^terima kasih (?:telah|sudah) menonton[\.!\s]*$", re.IGNORECASE),
+    re.compile(r"^thanks? (?:you )?for watching[\.!\s]*$", re.IGNORECASE),
+    re.compile(r"^subtitles by (?:the )?amara\.org community[\.!\s]*$", re.IGNORECASE),
     re.compile(r"^subt[ií]tulos por la comunidad de amara\.org[\.!\s]*$", re.IGNORECASE),
     re.compile(r"^subscribed?[\.!\s]*$", re.IGNORECASE),
-    re.compile(r"^(you[\.!\s]*){2,}$", re.IGNORECASE),
-    re.compile(r"^(thank you[\.!\s]*){2,}$", re.IGNORECASE),
-    re.compile(r"^(bye[\.!\s]*){2,}$", re.IGNORECASE),
+    re.compile(r"^sampai jumpa di (?:episode|video) (?:berikutnya|selanjutnya)[\.!\s]*$", re.IGNORECASE),
+    re.compile(r"^bersambung[\.!\s]*$", re.IGNORECASE),
     re.compile(r"^sub\s*indo\s+by\b.*$", re.IGNORECASE),
     re.compile(r"^(?:you\s+)*teksting\s+av\b.*$", re.IGNORECASE),
 ]
+
+_LOW_CONF_BOILERPLATE: Set[str] = {
+    "you", "thank you", "bye", "thanks", "terima kasih", "selamat", "semoga berhasil",
+}
 
 # Universal Indonesian-English phonetic collisions applied across all topics
 DEFAULT_PHONETIC_RULES: List[Tuple[re.Pattern, str]] = [
@@ -704,7 +707,7 @@ def extract_metadata_terms(
 
 
 def is_hallucination_segment(seg: Dict[str, Any]) -> bool:
-    """Detect boilerplate silence hallucinations or degenerated repetition."""
+    """Detect boilerplate silence hallucinations or punctuation-insensitive degenerated repetition."""
     text = (seg.get("text") or "").strip()
     clean_text = text.strip(" .!?,:;\"'").lower()
     if not clean_text:
@@ -713,13 +716,82 @@ def is_hallucination_segment(seg: Dict[str, Any]) -> bool:
     if any(pat.search(text) for pat in HALLUCINATION_PATTERNS):
         return True
 
-    no_speech = seg.get("no_speech_prob") or 0.0
-    avg_logprob = seg.get("avg_logprob") or 0.0
-    if clean_text in {"you", "thank you", "bye", "thanks", "terima kasih"} and (no_speech > 0.4 or avg_logprob < -0.7):
+    tokens = re.findall(r"[a-z0-9]+", clean_text)
+    if not tokens:
         return True
 
-    words = clean_text.split()
-    return len(words) >= 3 and len(set(words)) == 1
+    # Catch repeated single words even when separated by commas/periods ("Maksudnya, Maksudnya, Maksudnya,")
+    if len(tokens) >= 2 and len(set(tokens)) == 1 and tokens[0] in {"you", "bye", "thanks", "m", "oke"}:
+        return True
+    if len(tokens) >= 3 and len(set(tokens)) == 1:
+        return True
+
+    # Catch degenerated runs where one token dominates >= 75% of a >= 4-token segment
+    if len(tokens) >= 4:
+        counts: Dict[str, int] = {}
+        for tok in tokens:
+            counts[tok] = counts.get(tok, 0) + 1
+        if max(counts.values()) / len(tokens) >= 0.75:
+            return True
+
+    # Catch repeated "thank you" boilerplate without nested regex quantifiers
+    if len(tokens) >= 4 and len(tokens) % 2 == 0:
+        pairs = {(tokens[i], tokens[i + 1]) for i in range(0, len(tokens), 2)}
+        if pairs == {("thank", "you")}:
+            return True
+
+    no_speech = seg.get("no_speech_prob") or 0.0
+    avg_logprob = seg.get("avg_logprob") or 0.0
+    low_signal = no_speech > 0.35 or avg_logprob < -0.65
+
+    if low_signal and clean_text in _LOW_CONF_BOILERPLATE:
+        return True
+
+    if low_signal and len(tokens) <= 10 and clean_text.startswith("jangan lupa"):
+        cta_words = {"subscribe", "like", "share", "komen", "komentar", "channel"}
+        if len(cta_words.intersection(tokens)) >= 2:
+            return True
+
+    return False
+
+
+def is_prompt_echo_segment(
+    seg: Dict[str, Any],
+    prompt_terms: List[str],
+    style_seed: str = "",
+) -> bool:
+    """Detect when Whisper echoes the glossary/style-seed prompt during silence or background music."""
+    text = (seg.get("text") or "").strip()
+    if not text:
+        return False
+
+    no_speech = seg.get("no_speech_prob") or 0.0
+    avg_logprob = seg.get("avg_logprob") or 0.0
+    comp_ratio = seg.get("compression_ratio") or 0.0
+    if not (no_speech > 0.30 or avg_logprob < -0.60 or comp_ratio > 2.2):
+        return False
+
+    seg_tokens = re.findall(r"[a-z0-9]+", text.lower())
+    if len(seg_tokens) < 4:
+        return False
+
+    vocab: Set[str] = set()
+    for term in prompt_terms:
+        for tok in re.findall(r"[a-z0-9]+", str(term).lower()):
+            if len(tok) >= 3 and tok not in INDONESIAN_MARKERS:
+                vocab.add(tok)
+    if style_seed:
+        for tok in re.findall(r"[a-z0-9]+", style_seed.lower()):
+            if len(tok) >= 4 and tok not in INDONESIAN_MARKERS:
+                vocab.add(tok)
+
+    if not vocab:
+        return False
+
+    matched_positions = [tok for tok in seg_tokens if tok in vocab]
+    unique_hits = set(matched_positions)
+    overlap_ratio = len(matched_positions) / len(seg_tokens)
+    return len(unique_hits) >= 4 and overlap_ratio >= 0.40
 
 
 def _collect_tail_text(

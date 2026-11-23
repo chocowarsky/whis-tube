@@ -27,10 +27,22 @@ except ImportError:
 
 from .audio import get_video_info as _get_video_info
 from .audio import transcribe_video as _transcribe_video
+from .audit import (
+    audit_research_report as _audit_research_report,
+    format_audit_result as _format_audit_result,
+    scaffold_channel_workspace as _scaffold_channel_workspace,
+)
 from .config import DEFAULT_KEYS_PATH, MODEL, REPO_ROOT, YTDLP_BASE
 from .groq_pool import KeyPool, QuotaExhausted, load_groq_keys_with_sources
 from .runtime import ensure_runtime_binaries, is_binary_working
-from .utils import fmt_ts, list_channel_videos as _list_channel_videos
+from .utils import (
+    classify_asset_type,
+    fmt_ts,
+    format_catalog_duration,
+    list_channel_videos as _list_channel_videos,
+    sanitize_filename,
+    slugify_channel,
+)
 from .visual import extract_keyframe as _extract_keyframe
 
 logging.basicConfig(
@@ -124,16 +136,16 @@ async def extract_keyframe(
     url: str,
     timestamp: str,
     output_path: str = "",
-    resolution: int = 720,
+    resolution: int = 1080,
 ) -> str:
-    """Extract a native 720p or 1080p HD keyframe at an exact timecode (HH:MM:SS)
+    """Extract a native 1080p (or 720p) HD keyframe at an exact timecode (HH:MM:SS)
     via HLS m3u8 range-seek without downloading full video bytes.
 
     Args:
         url: YouTube video URL.
         timestamp: Exact timecode string ('HH:MM:SS' or 'MM:SS', e.g. '00:15:30').
         output_path: Optional output path (.jpg) or folder. Defaults to './frames/<video_id>_<HHMMSS>.jpg'.
-        resolution: Target resolution height in pixels (720 or 1080). Defaults to 720.
+        resolution: Target resolution height in pixels (1080 or 720). Defaults to 1080.
     """
     logger.info(f"Received extract_keyframe request: {url} at {timestamp} ({resolution}p)")
     try:
@@ -146,8 +158,8 @@ async def extract_keyframe(
             f"🖼️ Keyframe Extracted Successfully!\n\n"
             f"- **Timestamp:** {res['timestamp']}\n"
             f"- **Resolution:** {res['dimensions']}\n"
-            f"- **File Path:** `{res['image_path']}`\n\n"
-            f"**Markdown Embed Snippet:**\n"
+            f"- **File Path (for `read_file` visual inspection):** `{res['image_path']}`\n\n"
+            f"**Markdown Embed Snippet (relative):**\n"
             f"```markdown\n{res['markdown_embed']}\n```"
         )
     except Exception as exc:
@@ -160,7 +172,8 @@ async def extract_keyframe(
 
 @mcp.tool()
 async def get_video_info(url: str) -> str:
-    """Fetch YouTube video metadata (title, channel, duration, upload date, live status).
+    """Fetch YouTube video metadata plus deterministic channel routing fields
+    (channel handle, slug, asset type, sanitized title, and long-run timeout hint).
 
     Args:
         url: YouTube video URL.
@@ -177,16 +190,44 @@ async def get_video_info(url: str) -> str:
         else:
             vc_str = "N/A"
         vid_id = info.get("id") or "video"
+        title = info.get("title") or f"Video_{vid_id}"
+        channel = info.get("channel") or info.get("uploader") or "YouTube Creator"
+        uploader_id = info.get("uploader_id") or ""
+        channel_url = info.get("uploader_url") or info.get("channel_url") or ""
+        live_status = info.get("live_status") or "vod/uploaded"
+
+        slug = slugify_channel(channel)
+        asset_type = classify_asset_type(live_status)
+        safe_title = sanitize_filename(title)
+        prefix = "live" if asset_type == "livestreams" else "vid"
+
+        long_run_hint = ""
+        if dur >= 2700:
+            long_run_hint = (
+                f"\n- **Long-Run Hint:** Duration is {fmt_ts(dur)} (>=45m). "
+                "Prefer running `./.venv/bin/whis-tube --transcribe` as a background shell command "
+                "to avoid 3-minute MCP client timeouts."
+            )
+
+        handle_display = f"{uploader_id} ({channel_url})" if uploader_id and channel_url else (channel_url or uploader_id or "N/A")
         return (
             f"ℹ️ **YouTube Video Information**\n\n"
-            f"- **Title:** {info.get('title')}\n"
-            f"- **Channel:** {info.get('channel') or info.get('uploader')}\n"
-            f"- **Duration:** {fmt_ts(dur)} ({dur} seconds)\n"
+            f"- **Title:** {title}\n"
+            f"- **Sanitized Title:** `{safe_title}`\n"
+            f"- **Video ID:** `{vid_id}`\n"
+            f"- **Channel:** {channel}\n"
+            f"- **Channel Handle / URL:** {handle_display}\n"
+            f"- **Suggested Channel Slug:** `{slug}`\n"
+            f"- **Asset Type:** `{asset_type}`\n"
+            f"- **Duration:** {fmt_ts(dur)} ({format_catalog_duration(dur)}, {dur} seconds)\n"
             f"- **Upload Date:** {info.get('upload_date') or 'N/A'}\n"
-            f"- **Live Status:** {info.get('live_status') or 'vod/uploaded'}\n"
+            f"- **Live Status:** {live_status}\n"
             f"- **Source Language:** {info.get('language') or 'auto'}\n"
             f"- **View Count:** {vc_str}\n"
-            f"- **URL:** https://www.youtube.com/watch?v={vid_id}"
+            f"- **URL:** https://www.youtube.com/watch?v={vid_id}\n"
+            f"- **Recommended Raw Transcript:** `youtube-research/{slug}/raw-transcripts/{asset_type}/{vid_id}_{safe_title}.md`\n"
+            f"- **Recommended Analysis Report:** `youtube-research/{slug}/analysis/{asset_type}/{slug}_{prefix}_<num>_{vid_id}_{safe_title}.md`"
+            f"{long_run_hint}"
         )
     except Exception as exc:
         return f"❌ Failed to retrieve video information: {exc}"
@@ -293,6 +334,97 @@ async def check_groq_quota() -> str:
         return f"❌ Failed to check Groq quota: {exc}"
 
 
+# ── Tool 6: scaffold_channel_workspace ──────────────────────────────────────
+
+
+@mcp.tool()
+async def scaffold_channel_workspace(
+    workspace_root: str,
+    channel_name: str,
+    channel_url: str = "",
+    channel_slug: str = "",
+    video_id: str = "",
+    title: str = "",
+    duration: str = "",
+    asset_type: str = "videos",
+    status: str = "⏳ In Progress",
+) -> str:
+    """Create/update a standardized youtube-research/<channel-slug> workspace and CRLF catalogs.
+
+    Safely preserves existing catalog entries, recalculates Done/Pending header counters, and
+    strictly enforces Windows CRLF (\\r\\n) line endings. Call again at completion with
+    status='✅ **SELESAI**' (or '✅ **DONE**') to finalize a row cleanly.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        res = await loop.run_in_executor(
+            None,
+            lambda: _scaffold_channel_workspace(
+                workspace_root=workspace_root,
+                channel_name=channel_name,
+                channel_url=channel_url,
+                channel_slug=channel_slug,
+                video_id=video_id,
+                title=title,
+                duration=duration,
+                asset_type=asset_type,
+                status=status,
+            ),
+        )
+        row_info = f"- **Catalog Row:** #{res['row_number']} ({status})\n" if res.get("row_number") else ""
+        return (
+            f"📁 **Channel Workspace Ready (CRLF Enforced)**\n\n"
+            f"- **Channel:** {res['channel_name']} (`{res['channel_slug']}`)\n"
+            f"- **Directory:** `{res['channel_dir']}`\n"
+            f"- **Active Catalog:** `{res['active_catalog']}`\n"
+            f"{row_info}"
+            f"- **Transcript Target:** `{res['recommended_transcript_path']}`\n"
+            f"- **Frames Directory:** `{res['recommended_frames_dir']}`\n"
+            f"- **Analysis Report Target:** `{res['recommended_analysis_path']}`"
+        )
+    except Exception as exc:
+        logger.error(f"Error scaffolding workspace: {exc}", exc_info=True)
+        return f"❌ Failed to scaffold workspace: {exc}"
+
+
+# ── Tool 7: audit_research_report ───────────────────────────────────────────
+
+
+@mcp.tool()
+async def audit_research_report(
+    report_path: str,
+    transcript_path: str = "",
+    catalog_path: str = "",
+    min_frames: int = 0,
+    min_words: int = 0,
+    require_1080p: bool = True,
+) -> str:
+    """Run deterministic quality & compliance checks on a YouTube research analysis report.
+
+    Verifies filename standard, all 5 core sections, duration-proportional word/subsection depth,
+    chronological timestamp coverage, zero LaTeX/'$' characters, zero absolute/foreign paths,
+    1:1 frame parity with zero orphans, 1920x1080 resolution via ffprobe, raw transcript parity,
+    catalog CRLF endings, and clean channel root. Must PASS before marking a video DONE.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        res = await loop.run_in_executor(
+            None,
+            lambda: _audit_research_report(
+                report_path=report_path,
+                transcript_path=transcript_path,
+                catalog_path=catalog_path,
+                min_frames=min_frames,
+                min_words=min_words,
+                require_1080p=require_1080p,
+            ),
+        )
+        return _format_audit_result(res)
+    except Exception as exc:
+        logger.error(f"Error auditing report: {exc}", exc_info=True)
+        return f"❌ Failed to audit research report: {exc}"
+
+
 def _run_bootstrap(doctor_only: bool = False) -> int:
     bootstrap_file = REPO_ROOT / "bootstrap.py"
     if bootstrap_file.is_file():
@@ -334,7 +466,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         metavar=("URL", "TIMESTAMP"),
         help="Extract HD keyframe from URL at TIMESTAMP (e.g. 00:15:30).",
     )
-    parser.add_argument("--resolution", type=int, default=720, help="Keyframe height: 720 or 1080 (default: 720).")
+    parser.add_argument("--resolution", type=int, default=1080, help="Keyframe height: 1080 or 720 (default: 1080).")
     parser.add_argument("--transcribe", metavar="URL", help="Transcribe a YouTube video verbatim.")
     parser.add_argument("--output", default="", help="Output file or directory for --transcribe / --keyframe.")
     parser.add_argument("--language", default="", help="Language code override for --transcribe (e.g. id, en).")
@@ -344,6 +476,22 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         default="auto",
         help="Domain preset(s) for code-switching ('auto', 'none', or comma-separated names like 'tech,finance').",
     )
+    parser.add_argument("--scaffold", action="store_true", help="Create/update a channel workspace and CRLF catalogs.")
+    parser.add_argument("--workspace-root", default="youtube-research", help="Base workspace directory for --scaffold.")
+    parser.add_argument("--channel-name", default="", help="Channel display name for --scaffold.")
+    parser.add_argument("--channel-url", default="", help="Channel URL/handle for --scaffold.")
+    parser.add_argument("--channel-slug", default="", help="Optional explicit channel slug for --scaffold.")
+    parser.add_argument("--video-id", default="", help="Optional video ID to seed or update in catalog.")
+    parser.add_argument("--title", default="", help="Optional video title for --scaffold.")
+    parser.add_argument("--duration", default="", help="Optional video duration (seconds or '1h 04m 42s') for --scaffold.")
+    parser.add_argument("--asset-type", default="videos", help="Asset type ('videos' or 'livestreams') for --scaffold.")
+    parser.add_argument("--status", default="⏳ In Progress", help="Catalog row status for --scaffold.")
+    parser.add_argument("--audit-report", metavar="REPORT_PATH", help="Run compliance & depth audit on an analysis report.")
+    parser.add_argument("--transcript", default="", help="Optional explicit raw transcript .md path for --audit-report.")
+    parser.add_argument("--catalog", default="", help="Optional explicit catalog .md path for --audit-report.")
+    parser.add_argument("--min-frames", type=int, default=0, help="Override minimum embedded frame count for --audit-report.")
+    parser.add_argument("--min-words", type=int, default=0, help="Override minimum report word count for --audit-report.")
+    parser.add_argument("--allow-720p", action="store_true", help="Allow 720p frames instead of requiring 1920x1080.")
     return parser
 
 
@@ -380,6 +528,34 @@ def main():
                 language=args.language,
                 glossary=args.glossary,
                 preset=args.preset,
+            )
+        )
+    elif args.scaffold:
+        if not args.channel_name:
+            print("❌ --scaffold requires --channel-name", file=sys.stderr)
+            sys.exit(2)
+        output = asyncio.run(
+            scaffold_channel_workspace(
+                workspace_root=args.workspace_root,
+                channel_name=args.channel_name,
+                channel_url=args.channel_url,
+                channel_slug=args.channel_slug,
+                video_id=args.video_id,
+                title=args.title,
+                duration=args.duration,
+                asset_type=args.asset_type,
+                status=args.status,
+            )
+        )
+    elif args.audit_report:
+        output = asyncio.run(
+            audit_research_report(
+                report_path=args.audit_report,
+                transcript_path=args.transcript,
+                catalog_path=args.catalog,
+                min_frames=args.min_frames,
+                min_words=args.min_words,
+                require_1080p=not args.allow_720p,
             )
         )
     else:
