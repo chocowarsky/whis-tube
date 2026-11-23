@@ -10,8 +10,14 @@ import tempfile
 import unittest
 from unittest import mock
 
-from whis_tube.audio import _acquire_video_lock, _load_fresh_completed_result
-from whis_tube.audit import audit_research_report, format_audit_result, scaffold_channel_workspace
+from whis_tube.audio import _acquire_video_lock, _load_fresh_completed_result, _resolve_confined_path
+from whis_tube.audit import (
+    _find_missing_sections,
+    _parse_catalog_rows,
+    audit_research_report,
+    format_audit_result,
+    scaffold_channel_workspace,
+)
 from whis_tube.code_switch import is_hallucination_segment, is_prompt_echo_segment
 from whis_tube.utils import (
     classify_asset_type,
@@ -232,6 +238,41 @@ class TestLockingAndScaffoldAndAudit(unittest.TestCase):
             with mock.patch("whis_tube.audit._probe_image_dimensions", return_value=(1920, 1080)):
                 res_lf = audit_research_report(str(rpath))
                 self.assertTrue(any("CRLF violation" in e for e in res_lf["errors"]))
+
+    def test_confined_path_and_linear_parsers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = pathlib.Path(tmp)
+            valid = _resolve_confined_path(base, "MxyOhuzQsVY_Test.md")
+            self.assertEqual(valid, (base / "MxyOhuzQsVY_Test.md").resolve())
+
+            for bad in ("../evil.md", "../../etc/passwd", "/etc/passwd", "sub/file.md", "..\\evil.md", ".", "..", ""):
+                with self.assertRaises(ValueError):
+                    _resolve_confined_path(base, bad)
+
+        catalog_sample = (
+            "# Video Catalog: Test\r\n\r\n"
+            "| No. | Video ID | Duration | Status | Title | Link |\r\n"
+            "| :---: | :---: | :---: | :---: | :--- | :---: |\r\n"
+            "| 1 | `MxyOhuzQsVY` | 1h 54m 46s | ✅ **SELESAI** | Mic Mac Ep 4 | [Watch](https://www.youtube.com/watch?v=MxyOhuzQsVY) |\r\n"
+            "| invalid | `bad` | 1m | ⏳ | Not numeric | [Watch](https://example.com) |\r\n"
+        )
+        rows = _parse_catalog_rows(catalog_sample)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["video_id"], "MxyOhuzQsVY")
+        self.assertEqual(rows[0]["num"], "1")
+
+        full_headings = [
+            "## 1. Video Metadata",
+            "## 2. Executive Summary",
+            "## 3. Visual Evidence & Key Screenshots",
+            "## 4. Deep Conceptual Deconstruction",
+            "## 5. Technical Compliance Check",
+        ]
+        self.assertEqual(_find_missing_sections(full_headings), [])
+        self.assertEqual(
+            _find_missing_sections(["## 1. Metadata", "### 4.1. Executive Summary Only"]),
+            ["Executive Summary", "Visual Evidence", "Deep Conceptual Deconstruction", "Technical Compliance Check"],
+        )
 
 
 if __name__ == "__main__":

@@ -28,14 +28,13 @@ _LATEX_CMD_RE = re.compile(
 _MD_LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 _EMBED_FRAME_RE = re.compile(r"!\[[^\]]*\]\(frames/([^)]+\.(?:jpg|jpeg|png))\)")
 _TS_RE = re.compile(r"\b(\d{2}:\d{2}:\d{2})\b")
-_ROW_RE = re.compile(r"^\|\s*(\d+)\s*\|\s*`([^`]+)`\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*(.+?)\s*\|\s*(\[Watch\]\([^)]+\))\s*\|$")
 
-_SECTION_PATTERNS: List[Tuple[str, re.Pattern]] = [
-    ("Video Metadata", re.compile(r"^##\s+.*(?:video\s+metadata|metadata)", re.IGNORECASE | re.MULTILINE)),
-    ("Executive Summary", re.compile(r"^##\s+.*(?:executive\s+summary|ringkasan\s+eksekutif)", re.IGNORECASE | re.MULTILINE)),
-    ("Visual Evidence", re.compile(r"^##\s+.*(?:visual\s+evidence|screenshots?|bukti\s+visual)", re.IGNORECASE | re.MULTILINE)),
-    ("Deep Conceptual Deconstruction", re.compile(r"^##\s+.*(?:deep\s+conceptual|deconstruction|analisis\s+mendalam|bedah\s+konsep)", re.IGNORECASE | re.MULTILINE)),
-    ("Technical Compliance Check", re.compile(r"^##\s+.*(?:technical\s+compliance|compliance\s+check|kepatuhan\s+teknis)", re.IGNORECASE | re.MULTILINE)),
+_REQUIRED_SECTIONS: List[Tuple[str, Tuple[str, ...]]] = [
+    ("Video Metadata", ("video metadata", "metadata")),
+    ("Executive Summary", ("executive summary", "ringkasan eksekutif")),
+    ("Visual Evidence", ("visual evidence", "screenshot", "bukti visual")),
+    ("Deep Conceptual Deconstruction", ("deep conceptual", "deconstruction", "analisis mendalam", "bedah konsep")),
+    ("Technical Compliance Check", ("technical compliance", "compliance check", "kepatuhan teknis")),
 ]
 
 _DONE_MARKERS = ("✅", "SELESAI", "DONE")
@@ -68,21 +67,44 @@ def _normalize_channel_tab_url(channel_url: str, asset_type: str) -> str:
 
 
 def _parse_catalog_rows(text: str) -> List[Dict[str, str]]:
-    """Parse existing Markdown catalog rows into structured dicts."""
+    """Parse existing Markdown catalog rows into structured dicts using linear splitting."""
     rows: List[Dict[str, str]] = []
     for raw_line in text.splitlines():
-        m = _ROW_RE.match(raw_line.strip())
-        if not m:
+        line = raw_line.strip()
+        if not (line.startswith("|") and line.endswith("|")):
+            continue
+        cells = [c.strip() for c in line[1:-1].split("|")]
+        if len(cells) != 6:
+            continue
+        num, vid_cell, duration, status, title, link = cells
+        if not (num.isdigit() and vid_cell.startswith("`") and vid_cell.endswith("`") and len(vid_cell) >= 3):
+            continue
+        if not (link.startswith("[Watch](") and link.endswith(")")):
             continue
         rows.append({
-            "num": m.group(1).strip(),
-            "video_id": m.group(2).strip(),
-            "duration": m.group(3).strip(),
-            "status": m.group(4).strip(),
-            "title": m.group(5).strip(),
-            "link": m.group(6).strip(),
+            "num": num,
+            "video_id": vid_cell[1:-1].strip(),
+            "duration": duration,
+            "status": status,
+            "title": title,
+            "link": link,
         })
     return rows
+
+
+def _find_missing_sections(lines: List[str]) -> List[str]:
+    """Identify missing required level-2 Markdown sections using linear heading scans."""
+    headings: List[str] = []
+    for raw_line in lines:
+        stripped = raw_line.lstrip()
+        if stripped.startswith("## ") or stripped.startswith("##\t"):
+            headings.append(" ".join(stripped[3:].lower().split()))
+
+    missing: List[str] = []
+    for section_name, keywords in _REQUIRED_SECTIONS:
+        if not any(any(kw in h for kw in keywords) for h in headings):
+            missing.append(section_name)
+    return missing
 
 
 def _render_catalog(
@@ -558,7 +580,7 @@ def audit_research_report(
     req_words = min_words if min_words > 0 else auto_words
 
     # 3. Required sections & structural depth
-    missing_sections = [name for name, pat in _SECTION_PATTERNS if not pat.search(report_text)]
+    missing_sections = _find_missing_sections(lines)
     if missing_sections:
         errors.append(f"Missing required report section(s): {', '.join(missing_sections)}.")
 

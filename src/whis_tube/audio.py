@@ -376,10 +376,35 @@ def cut_chunk(flac: pathlib.Path, idx: int, start: float, end: float) -> pathlib
     return out
 
 
+def _resolve_confined_path(base_dir: pathlib.Path, filename: str) -> pathlib.Path:
+    """Resolve a filename strictly within base_dir to prevent path traversal (CWE-22)."""
+    base_real = os.path.realpath(str(base_dir))
+    name = str(filename or "")
+    if (
+        not name
+        or name in (".", "..")
+        or os.path.isabs(name)
+        or "/" in name
+        or "\\" in name
+        or os.path.basename(name) != name
+    ):
+        raise ValueError(f"Invalid output filename: {filename}")
+    candidate = os.path.realpath(os.path.join(base_real, name))
+    base_prefix = base_real if base_real.endswith(os.sep) else base_real + os.sep
+    if not candidate.startswith(base_prefix):
+        raise ValueError(f"Unsafe path outside target directory: {filename}")
+    return pathlib.Path(candidate)
+
+
 def _atomic_json(path: pathlib.Path, obj: Any) -> None:
     tmp = path.with_name(f"{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, path)
+
+
+def _ckpt_dir(vid: str) -> pathlib.Path:
+    """Resolve a per-video checkpoint directory strictly inside CKPT_ROOT."""
+    return _resolve_confined_path(CKPT_ROOT, sanitize_filename(vid))
 
 
 def load_or_make_plan(
@@ -390,7 +415,7 @@ def load_or_make_plan(
     """Retrieve saved cutting plan from checkpoint or generate fresh plan."""
     if real_dur <= 0:
         raise ValueError(f"Cannot create plan for zero or negative duration: {real_dur}")
-    p = CKPT_ROOT / vid / "plan.json"
+    p = _ckpt_dir(vid) / "plan.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     if p.exists():
         try:
@@ -408,7 +433,7 @@ def load_or_make_plan(
 
 
 def load_chunk_ckpt(vid: str, idx: int) -> Optional[Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]]:
-    p = CKPT_ROOT / vid / f"chunk{idx:03d}.json"
+    p = _ckpt_dir(vid) / f"chunk{idx:03d}.json"
     if not p.exists():
         return None
     try:
@@ -419,7 +444,7 @@ def load_chunk_ckpt(vid: str, idx: int) -> Optional[Tuple[List[Dict[str, Any]], 
 
 
 def save_chunk_ckpt(vid: str, idx: int, segs: List[Dict[str, Any]], words: List[Dict[str, Any]]) -> None:
-    _atomic_json(CKPT_ROOT / vid / f"chunk{idx:03d}.json", {"segments": segs, "words": words})
+    _atomic_json(_ckpt_dir(vid) / f"chunk{idx:03d}.json", {"segments": segs, "words": words})
 
 
 def prune_scratch_cache(retention_days: int = SCRATCH_RETENTION_DAYS) -> int:
@@ -588,7 +613,7 @@ def transcribe_video(
     pool = KeyPool(keys)
 
     info = get_video_info(url)
-    vid = info["id"]
+    vid = sanitize_filename(str(info.get("id") or "video"))
     title = info.get("title") or f"Video_{vid}"
     duration = int(info.get("duration") or 0)
     channel = info.get("channel") or info.get("uploader") or "YouTube Creator"
@@ -604,17 +629,17 @@ def transcribe_video(
     if not output_path:
         out_dir = pathlib.Path("transcripts")
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_file = out_dir / default_name
+        out_file = _resolve_confined_path(out_dir, default_name)
     else:
         target = pathlib.Path(output_path)
         if target.is_dir() or output_path.endswith(("/", "\\")):
             target.mkdir(parents=True, exist_ok=True)
-            out_file = target / default_name
+            out_file = _resolve_confined_path(target, default_name)
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
-            out_file = target
+            out_file = _resolve_confined_path(target.parent, target.name)
 
-    raw_file = out_file.with_name(out_file.stem + "_raw.json")
+    raw_file = _resolve_confined_path(out_file.parent, out_file.stem + "_raw.json")
     t0 = time.time()
     lock_path, waited_for_active = _acquire_video_lock(vid)
     try:
@@ -817,7 +842,7 @@ def transcribe_video(
         )
 
         # Clean up checkpoint folder and stale scratch cache upon full success
-        shutil.rmtree(CKPT_ROOT / vid, ignore_errors=True)
+        shutil.rmtree(_ckpt_dir(vid), ignore_errors=True)
         prune_scratch_cache()
 
         elapsed = round(time.time() - t0, 1)
