@@ -1,0 +1,4 @@
+# ~/.codex/config.toml
+[mcp_servers.youtube-whisper]
+command = "python3"
+args = ["/ABSOLUTE/PATH/whis-tube/bootstrap.py", "--serve"]

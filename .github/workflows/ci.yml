@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package in editable mode
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -e .
+
+      - name: Validate JSON manifests and bootstrap syntax
+        run: |
+          python3 -m py_compile bootstrap.py
+          python3 bootstrap.py --help
+          python3 -c '
+          import json, pathlib
+          for p in ["plugin.json", ".mcp.json", "mcp_config.json", ".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", "keys.example.json", "lexicon.example.json"]:
+              json.loads(pathlib.Path(p).read_text(encoding="utf-8"))
+              print("valid JSON:", p)
+          for p in sorted(pathlib.Path("examples").glob("*.json")):
+              json.loads(p.read_text(encoding="utf-8"))
+              print("valid JSON:", p)
+          '
+
+      - name: Scan tracked files for leaked Groq API keys
+        run: |
+          python3 -c '
+          import re, subprocess, sys
+          files = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
+          pat = re.compile(r"\bgsk_[A-Za-z0-9]{20,}\b")
+          hits = []
+          for f in files:
+              try:
+                  txt = open(f, encoding="utf-8", errors="ignore").read()
+              except OSError:
+                  continue
+              if pat.search(txt):
+                  hits.append(f)
+          if hits:
+              print("LEAKED GROQ KEY PATTERN IN:", hits, file=sys.stderr)
+              sys.exit(1)
+          print("Secret scan passed: 0 real gsk_ keys in tracked files.")
+          '
+
+      - name: Run unit test suite
+        run: python3 -m unittest discover -s tests -v

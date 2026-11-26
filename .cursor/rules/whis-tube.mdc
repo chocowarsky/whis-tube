@@ -1,0 +1,13 @@
+---
+description: Zero-sudo setup, Groq API key rules, MCP/CLI usage, and channel research SOP for whis-tube.
+alwaysApply: false
+---
+
+# whis-tube — Cursor Agent Rule
+
+Read `AGENTS.md` and `skills/youtube-whisper/SKILL.md` for full setup and SOP rules.
+
+1. **Zero-sudo setup:** Run `python3 bootstrap.py` (never use `sudo`/`apt`/`brew`), then verify with `python3 bootstrap.py --doctor --json`.
+2. **Groq API keys:** Users paste `gsk_...` keys into `./keys.json` (protected by `chmod 600`, `skip-worktree`, and `.git/hooks/pre-commit`) or `~/.config/groq/keys.json` / `GROQ_API_KEY`. Never print, log, echo, or commit raw `gsk_...` keys.
+3. **MCP & CLI:** Launch MCP via `python3 bootstrap.py --serve`, or run `./.venv/bin/whis-tube --transcribe | --keyframe | --info | --list-channel | --scaffold | --audit-report | --check-quota` (prefer CLI for streams `>= 45 min`).
+4. **Tests:** Run `./.venv/bin/python -m unittest discover -s tests -v`.

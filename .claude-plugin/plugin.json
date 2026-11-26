@@ -1,0 +1,12 @@
+{
+  "name": "whis-tube",
+  "version": "1.3.0",
+  "description": "High-fidelity YouTube verbatim transcription (Groq Whisper Large V3), bilingual code-switching, 1080p keyframe extraction, and deterministic research report auditing MCP server & agent skill.",
+  "author": {
+    "name": "chocowarsky",
+    "url": "https://github.com/chocowarsky"
+  },
+  "repository": "https://github.com/chocowarsky/whis-tube",
+  "license": "MIT",
+  "keywords": ["mcp", "youtube", "whisper", "groq", "transcription", "ffmpeg", "yt-dlp", "agent-skill"]
+}

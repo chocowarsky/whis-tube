@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "youtube-whisper": {
+      "command": "python3",
+      "args": ["/ABSOLUTE/PATH/whis-tube/bootstrap.py", "--serve"],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}

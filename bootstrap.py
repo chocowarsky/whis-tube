@@ -581,7 +581,7 @@ def _inspect_key_sources() -> Tuple[int, List[str]]:
     return len(seen_keys), sources
 
 
-def run_doctor(print_report: bool = True) -> int:
+def run_doctor(print_report: bool = True, as_json: bool = False) -> int:
     _prepend_path(BIN_DIR)
     _prepend_path(VENV_DIR / ("Scripts" if os.name == "nt" else "bin"))
 
@@ -597,7 +597,22 @@ def run_doctor(print_report: bool = True) -> int:
     key_count, key_sources = _inspect_key_sources()
 
     all_deps_ok = bool(uv_p and ff_p and fp_p and venv_ok and yt_ok)
-    if print_report:
+    if as_json:
+        payload = {
+            "repo_root": str(REPO_ROOT),
+            "deps_ready": all_deps_ok,
+            "ready": bool(all_deps_ok and key_count > 0),
+            "uv": str(uv_p) if uv_p else None,
+            "ffmpeg": str(ff_p) if ff_p else None,
+            "ffprobe": str(fp_p) if fp_p else None,
+            "venv_python": str(venv_py) if venv_ok else None,
+            "yt_dlp": yt_ok,
+            "local_keys_exists": (REPO_ROOT / "keys.json").exists(),
+            "key_count": key_count,
+            "key_sources": key_sources,
+        }
+        print(json.dumps(payload, indent=2))
+    elif print_report:
         print("=== whis-tube Doctor ===")
         print(f"Repo Root : {REPO_ROOT}")
         print(f"uv        : {uv_p or 'MISSING'}")
@@ -627,11 +642,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Zero-sudo bootstrap & launcher for whis-tube.")
     parser.add_argument("--serve", action="store_true", help="Ensure runtime quietly and exec MCP stdio server.")
     parser.add_argument("--doctor", action="store_true", help="Inspect installation and Groq key readiness.")
+    parser.add_argument("--json", dest="as_json", action="store_true", help="Emit JSON output for --doctor.")
     parser.add_argument("--no-register", action="store_true", help="Skip Antigravity ~/.gemini/config registration.")
     args = parser.parse_args()
 
     if args.doctor:
-        sys.exit(run_doctor(print_report=True))
+        sys.exit(run_doctor(print_report=True, as_json=args.as_json))
 
     if args.serve:
         venv_python = ensure_all(quiet=True, register=False)

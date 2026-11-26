@@ -17,11 +17,27 @@ What `bootstrap.py` automatically provisions using Python's standard library alo
 - Configures `./keys.json` with `chmod 600`, `git update-index --skip-worktree keys.json`, and a `.git/hooks/pre-commit` secret guard so real API keys are never committed or pushed.
 - Auto-registers `youtube-whisper` in Antigravity (`~/.gemini/config/mcp_config.json` & `~/.gemini/config/plugins/whis-tube`) when `~/.gemini` exists.
 
-Verify readiness anytime with:
+Verify readiness anytime with (human-readable or machine JSON for agents):
 
 ```bash
 python3 bootstrap.py --doctor
+python3 bootstrap.py --doctor --json
 ```
+
+### Universal Harness Registration Matrix
+
+All harnesses launch the exact same zero-sudo local stdio entrypoint (`python3 /ABSOLUTE/PATH/whis-tube/bootstrap.py --serve`), with zero API keys passed in CLI args:
+
+| Agent Harness | Config / Registration | Template |
+| :--- | :--- | :--- |
+| **`skills.sh` CLI** | `npx skills add chocowarsky/whis-tube` | [`skills/youtube-whisper/SKILL.md`](skills/youtube-whisper/SKILL.md) |
+| **Antigravity (AGY)** | Auto-registered by `python3 bootstrap.py` into `~/.gemini/config/mcp_config.json` | [`examples/antigravity-mcp.json`](examples/antigravity-mcp.json) |
+| **Claude Code** | `/plugin marketplace add chocowarsky/whis-tube` or `claude mcp add` | [`examples/claude-code.sh`](examples/claude-code.sh) |
+| **OpenAI Codex** | `~/.codex/config.toml` | [`examples/codex-config.toml`](examples/codex-config.toml) |
+| **Cursor / Windsurf** | `~/.cursor/mcp.json` or `~/.codeium/windsurf/mcp_config.json` | [`examples/cursor-mcp.json`](examples/cursor-mcp.json) |
+| **VS Code / Copilot** | `.vscode/mcp.json` | [`examples/vscode-mcp.json`](examples/vscode-mcp.json) |
+| **OpenCode** | `opencode.json` (`type: "local"`, leave `cwd` unset) | [`examples/opencode.json`](examples/opencode.json) |
+| **Cline / Roo Code** | `cline_mcp_settings.json` | [`examples/cline-mcp.json`](examples/cline-mcp.json) |
 
 ## 2. API Key Configuration (`./keys.json`)
 
